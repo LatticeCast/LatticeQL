@@ -6,6 +6,50 @@
 
 ---
 
+## Python package — quick start
+
+**Install (editable):**
+
+```bash
+pip install -e ".[dev]"
+```
+
+**Python API:**
+
+```python
+from lattice_ql import compile
+
+schema = {
+    "Tasks": {
+        "table_id": "tbl-tasks",
+        "columns": {
+            "status":   {"id": "col-status",   "type": "select"},
+            "priority": {"id": "col-priority", "type": "select"}
+        }
+    }
+}
+
+sql = compile('table("Tasks") | aggregate(count())', schema)
+print(sql)
+```
+
+**CLI (`lqlc`):**
+
+```bash
+# file + schema file
+lqlc query.lql --schema schema.json
+
+# stdin + inline JSON schema
+echo 'table("Tasks") | aggregate(count())' | lqlc --schema-json '{"Tasks": {...}}'
+```
+
+The compiler pipeline is: **lexer → parser → resolver → sema → codegen**.
+`$1` is always `workspace_id`; additional `$param` values follow in order of first appearance.
+
+See `CHANGELOG.md` for what is implemented in v0.1 and what is deferred.
+
+---
+
 ## 0. Why this exists
 
 LatticeCast core is Airtable-like JSONB engine (Postgres GIN index on jsonb) as core, and extend to project management system by just adding timeline view, kanban view, table view.
