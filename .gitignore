@@ -5,6 +5,7 @@ supervisord.pid
 log/
 workspace/
 temp/
+.tmp/
 *.log
 *.png
 
