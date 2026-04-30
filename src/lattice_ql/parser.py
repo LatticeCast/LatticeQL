@@ -11,16 +11,21 @@ from .ast import (
     HavingStage,
     InExpr,
     Lambda,
+    LetBinding,
     LimitStage,
     Literal,
     MatchArm,
     MatchExpr,
+    ParamExpr,
     PipeExpr,
+    Program,
     Query,
     SortKey,
     SortStage,
     TableStage,
     UnaryOp,
+    VarRefStage,
+    WithColumnStage,
 )
 from .error import ParseError
 from .lexer import TT, Token, tokenize
@@ -56,18 +61,48 @@ class Parser:
     # ------------------------------------------------------------------
 
     def parse(self) -> Query:
+        prog = self.parse_program()
+        if prog.bindings:
+            raise ParseError(
+                "variable bindings require parse_program(); not supported in compile()"
+            )
+        return prog.query
+
+    def parse_program(self) -> Program:
+        bindings: list[LetBinding] = []
+        while self._is_let_binding():
+            name = str(self._advance().value)  # consume IDENT
+            self._advance()  # consume WALRUS (:=)
+            bindings.append(LetBinding(name=name, query=self._parse_pipeline()))
+        query = self._parse_pipeline()
+        self._expect(TT.EOF)
+        return Program(bindings=bindings, query=query)
+
+    def _is_let_binding(self) -> bool:
+        return (
+            self._peek().kind == TT.IDENT
+            and self._pos + 1 < len(self._tokens)
+            and self._tokens[self._pos + 1].kind == TT.WALRUS
+        )
+
+    def _parse_pipeline(self) -> Query:
         stages = []
-        stage = self._parse_stage()
-        stages.append(stage)
+        stages.append(self._parse_stage())
         while self._eat(TT.PIPE):
             stages.append(self._parse_stage())
-        self._expect(TT.EOF)
-        return Query(stages)
+        return Query(stages=stages)
 
     def _parse_stage(self) -> object:
         t = self._peek()
         if t.kind != TT.IDENT:
             raise ParseError(f"Expected stage name at pos {t.pos}")
+        # bare identifier not followed by '(' → variable reference (e.g. sprint_all)
+        next_kind = (
+            self._tokens[self._pos + 1].kind if self._pos + 1 < len(self._tokens) else TT.EOF
+        )
+        if next_kind != TT.LPAREN:
+            self._advance()
+            return VarRefStage(name=str(t.value))
         name = t.value
         self._advance()
         self._expect(TT.LPAREN)
@@ -89,10 +124,18 @@ class Parser:
             result = self._parse_limit_stage()
         elif name == "having":
             result = self._parse_having_stage()
+        elif name == "with_column":
+            result = self._parse_with_column_stage()
         else:
             raise ParseError(f"Unknown stage: {name!r} at pos {t.pos}")
         self._expect(TT.RPAREN)
         return result
+
+    def _parse_with_column_stage(self) -> WithColumnStage:
+        col_name = str(self._expect(TT.STRING).value)
+        self._expect(TT.COMMA)
+        lam = self._parse_lambda()
+        return WithColumnStage(name=col_name, lambda_=lam)
 
     def _parse_table_stage(self) -> TableStage:
         name = self._expect(TT.STRING).value
@@ -319,6 +362,10 @@ class Parser:
             self._expect(TT.RPAREN)
             return expr
 
+        if t.kind == TT.PARAM:
+            self._advance()
+            return ParamExpr(name=str(t.value))
+
         raise ParseError(f"Unexpected token {t.kind} ({t.value!r}) at pos {t.pos}")
 
     def _parse_call(self) -> FuncCall:
@@ -356,3 +403,8 @@ class Parser:
 def parse(src: str) -> Query:
     tokens = tokenize(src)
     return Parser(tokens).parse()
+
+
+def parse_program(src: str) -> Program:
+    tokens = tokenize(src)
+    return Parser(tokens).parse_program()

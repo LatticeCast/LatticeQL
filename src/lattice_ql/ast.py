@@ -129,3 +129,31 @@ class AggExpr:
 class SortKey:
     expr: Expr
     desc: bool = False
+
+
+@dataclass
+class WithColumnStage:
+    name: str
+    lambda_: Lambda
+
+
+@dataclass
+class ParamExpr:
+    name: str  # e.g. "sprint" for $sprint
+
+
+@dataclass
+class VarRefStage:
+    name: str  # e.g. "sprint_all"
+
+
+@dataclass
+class LetBinding:
+    name: str
+    query: Query
+
+
+@dataclass
+class Program:
+    bindings: list[LetBinding]
+    query: Query

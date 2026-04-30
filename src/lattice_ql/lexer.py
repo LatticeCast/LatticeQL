@@ -38,6 +38,8 @@ class TT(Enum):
     AND = auto()  # &&
     OR = auto()  # ||
     NOT = auto()  # !
+    WALRUS = auto()  # :=
+    PARAM = auto()  # $ident
     UNDERSCORE = auto()  # _
     EOF = auto()
 
@@ -72,10 +74,12 @@ _PATTERNS: list[tuple[str, TT | None]] = [
     (r"\]", TT.RBRACKET),
     (r"@", TT.AT),
     (r",", TT.COMMA),
+    (r":=", TT.WALRUS),
     (r":", TT.COLON),
     (r"\.", TT.DOT),
     (r";", TT.SEMI),
     (r"!", TT.NOT),
+    (r"\$[A-Za-z_][A-Za-z0-9_]*", TT.PARAM),
     (r"_\b", TT.UNDERSCORE),
     (r"[A-Za-z_][A-Za-z0-9_]*", TT.IDENT),
 ]
@@ -114,6 +118,8 @@ def tokenize(src: str) -> list[Token]:
                     value = float(raw) if "." in raw else int(raw)
                 elif tt == TT.BOOL:
                     value = raw == "true"
+                elif tt == TT.PARAM:
+                    value = raw[1:]  # strip leading $
                 else:
                     value = raw
                 tokens.append(Token(tt, value, m.start()))
