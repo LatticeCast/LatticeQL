@@ -16,3 +16,7 @@ class SchemaError(LatticeQLError):
 
 class CodegenError(LatticeQLError):
     pass
+
+
+class SemaError(LatticeQLError):
+    pass

@@ -7,6 +7,7 @@ from .ast import (
     FieldAccess,
     FilterStage,
     FuncCall,
+    GinContainment,
     GroupByStage,
     HavingStage,
     InExpr,
@@ -167,12 +168,11 @@ class Codegen:
     # ------------------------------------------------------------------
 
     def _where_sql(self, expr: object) -> str:
+        if isinstance(expr, GinContainment):
+            body = ",".join(f'"{cid}":"{val}"' for cid, val in expr.pairs)
+            return f"row_data @> '{{{body}}}'::jsonb"
         if isinstance(expr, BinOp):
             if expr.op == "==" and isinstance(expr.left, FieldAccess):
-                if isinstance(expr.right, Literal) and isinstance(expr.right.value, str):
-                    cid = expr.left.field
-                    val = expr.right.value.replace("'", "''")
-                    return f'row_data @> \'{{"{cid}":"{val}"}}\'::jsonb'
                 if isinstance(expr.right, ParamExpr):
                     cid = expr.left.field
                     param_sql = self._expr_sql(expr.right)
@@ -183,9 +183,6 @@ class Codegen:
                     val = expr.right.value.replace("'", "''")
                     return f"(row_data->>'{cid}' ) != ('{val}')"
             if expr.op == "&&":
-                merged = self._try_gin_merge(expr)
-                if merged is not None:
-                    return merged
                 return f"({self._where_sql(expr.left)} AND {self._where_sql(expr.right)})"
             if expr.op == "||":
                 return f"({self._where_sql(expr.left)} OR {self._where_sql(expr.right)})"
@@ -204,31 +201,6 @@ class Codegen:
             )
             return f"row_data->>'{cid}'  IN ({items_sql})"
         return self._expr_sql(expr)
-
-    def _try_gin_merge(self, expr: BinOp) -> str | None:
-        """Merge a chain of (field == string) && conditions into a single @> containment."""
-        pairs = self._collect_eq_pairs(expr)
-        if pairs is None:
-            return None
-        body = ",".join(f'"{cid}":"{val}"' for cid, val in pairs)
-        return f"row_data @> '{{{body}}}'::jsonb"
-
-    def _collect_eq_pairs(self, expr: object) -> list[tuple[str, str]] | None:
-        if isinstance(expr, BinOp) and expr.op == "&&":
-            left = self._collect_eq_pairs(expr.left)
-            right = self._collect_eq_pairs(expr.right)
-            if left is None or right is None:
-                return None
-            return left + right
-        if (
-            isinstance(expr, BinOp)
-            and expr.op == "=="
-            and isinstance(expr.left, FieldAccess)
-            and isinstance(expr.right, Literal)
-            and isinstance(expr.right.value, str)
-        ):
-            return [(expr.left.field, expr.right.value.replace("'", "''"))]
-        return None
 
     # ------------------------------------------------------------------
     # General expression → SQL

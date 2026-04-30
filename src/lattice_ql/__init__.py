@@ -9,6 +9,7 @@ from .error import ParseError
 from .parser import parse_program
 from .resolver import Resolver
 from .schema import Schema, load_schema
+from .sema import Sema
 
 __all__ = ["compile", "Schema", "load_schema"]
 
@@ -29,7 +30,8 @@ def compile(lql: str, schema: Union[dict, str, Path, Schema]) -> str:
     bindings = {b.name: b.query for b in prog.bindings}
     query = _expand_bindings(prog.query, bindings)
     resolved = Resolver(schema).resolve(query)
-    return Codegen(schema).generate(resolved)
+    checked = Sema(schema).transform(resolved)
+    return Codegen(schema).generate(checked)
 
 
 def _expand_bindings(query: Query, bindings: dict) -> Query:

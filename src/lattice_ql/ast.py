@@ -157,3 +157,10 @@ class LetBinding:
 class Program:
     bindings: list[LetBinding]
     query: Query
+
+
+@dataclass
+class GinContainment:
+    """Multiple (col_id, string_value) pairs merged into one GIN @> containment."""
+
+    pairs: list[tuple[str, str]]
