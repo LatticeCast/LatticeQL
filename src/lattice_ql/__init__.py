@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Union
 
 from .ast import Query, VarRefStage
@@ -9,10 +10,10 @@ from .parser import parse_program
 from .resolver import Resolver
 from .schema import Schema, load_schema
 
-__all__ = ["compile", "Schema"]
+__all__ = ["compile", "Schema", "load_schema"]
 
 
-def compile(lql: str, schema: Union[dict, str, Schema]) -> str:
+def compile(lql: str, schema: Union[dict, str, Path, Schema]) -> str:
     """Compile a LatticeQL query string to PostgreSQL SQL.
 
     Args:

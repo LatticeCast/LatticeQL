@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Union
 
 from .error import SchemaError
@@ -71,7 +72,21 @@ class Schema:
         return self._tables.get(table_name)
 
 
-def load_schema(schema: Union[dict, str]) -> Schema:
+def load_schema(schema: Union[dict, str, Path]) -> Schema:
     if isinstance(schema, dict):
         return Schema.from_dict(schema)
+    if isinstance(schema, Path):
+        try:
+            text = schema.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise SchemaError(f"Cannot read schema file {schema}: {exc}") from exc
+        return Schema.from_json(text)
+    # str: if it looks like a file path (doesn't start with '{'), treat as path
+    if not schema.lstrip().startswith("{"):
+        path = Path(schema)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise SchemaError(f"Cannot read schema file {schema!r}: {exc}") from exc
+        return Schema.from_json(text)
     return Schema.from_json(schema)
