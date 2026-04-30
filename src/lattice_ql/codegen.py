@@ -14,12 +14,14 @@ from .ast import (
     LimitStage,
     Literal,
     MatchExpr,
+    ParamExpr,
     PipeExpr,
     Query,
     SortKey,
     SortStage,
     TableStage,
     UnaryOp,
+    WithColumnStage,
 )
 from .error import CodegenError
 from .schema import Schema
@@ -28,6 +30,8 @@ from .schema import Schema
 class Codegen:
     def __init__(self, schema: Schema) -> None:
         self._schema = schema
+        self._virtual_cols: dict[str, object] = {}
+        self._param_names: list[str] = []
 
     def generate(self, query: Query) -> str:
         table_stage: TableStage = query.stages[0]  # type: ignore[assignment]
@@ -44,7 +48,9 @@ class Codegen:
         seen_aggregate = False
 
         for stage in rest:
-            if isinstance(stage, FilterStage):
+            if isinstance(stage, WithColumnStage):
+                self._virtual_cols[stage.name] = stage.lambda_.body
+            elif isinstance(stage, FilterStage):
                 if seen_aggregate:
                     post_filters.append(stage)
                 else:
@@ -130,7 +136,9 @@ class Codegen:
 
         def entry(alias: str, lam: Lambda) -> tuple[str, str, bool]:
             sql = self._expr_sql(lam.body)
-            is_field = isinstance(lam.body, FieldAccess)
+            is_field = isinstance(lam.body, FieldAccess) and (
+                lam.body.field not in self._virtual_cols
+            )
             return alias, sql, is_field
 
         if isinstance(gb.dims, dict):
@@ -141,7 +149,18 @@ class Codegen:
         return self._where_sql(lam.body)
 
     def _having_cond(self, lam: Lambda) -> str:
-        return self._expr_sql(lam.body)
+        return self._having_expr_sql(lam.body)
+
+    def _having_expr_sql(self, expr: object) -> str:
+        """Expression SQL in HAVING context: FieldAccess refers to aggregate alias."""
+        if isinstance(expr, BinOp):
+            op = self._sql_op(expr.op)
+            left = f"({self._having_expr_sql(expr.left)})"
+            right = f"({self._having_expr_sql(expr.right)})"
+            return f"{left} {op} {right}"
+        if isinstance(expr, FieldAccess):
+            return expr.field  # aggregate alias name
+        return self._expr_sql(expr)
 
     # ------------------------------------------------------------------
     # WHERE expression — uses GIN @> for text equality
@@ -154,6 +173,10 @@ class Codegen:
                     cid = expr.left.field
                     val = expr.right.value.replace("'", "''")
                     return f'row_data @> \'{{"{cid}":"{val}"}}\'::jsonb'
+                if isinstance(expr.right, ParamExpr):
+                    cid = expr.left.field
+                    param_sql = self._expr_sql(expr.right)
+                    return f"(row_data->>'{cid}' ) = ({param_sql})"
             if expr.op == "!=" and isinstance(expr.left, FieldAccess):
                 if isinstance(expr.right, Literal) and isinstance(expr.right.value, str):
                     cid = expr.left.field
@@ -213,7 +236,14 @@ class Codegen:
 
     def _expr_sql(self, expr: object) -> str:
         if isinstance(expr, FieldAccess):
+            if expr.field in self._virtual_cols:
+                return self._expr_sql(self._virtual_cols[expr.field])
             return f"row_data->>'{expr.field}'"
+        if isinstance(expr, ParamExpr):
+            if expr.name not in self._param_names:
+                self._param_names.append(expr.name)
+            idx = self._param_names.index(expr.name) + 2  # $1 is workspace_id
+            return f"${idx}"
         if isinstance(expr, Literal):
             v = expr.value
             if v is None:
@@ -248,16 +278,16 @@ class Codegen:
 
     def _match_sql(self, expr: MatchExpr) -> str:
         subject = self._expr_sql(expr.subject)
-        when_clauses: list[str] = []
-        else_clause = ""
+        lines = [f"CASE {subject}"]
         for arm in expr.arms:
             if arm.pattern is None:
-                else_clause = f" ELSE {self._expr_sql(arm.result)}"
+                lines.append(f"  ELSE {self._expr_sql(arm.result)}")
             else:
                 pat = self._expr_sql(arm.pattern)
                 res = self._expr_sql(arm.result)
-                when_clauses.append(f" WHEN {subject} = {pat} THEN {res}")
-        return f"CASE{''.join(when_clauses)}{else_clause} END"
+                lines.append(f"  WHEN {pat} THEN {res}")
+        lines.append("END")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Aggregates
@@ -296,7 +326,10 @@ class Codegen:
         raise CodegenError(f"Unknown aggregate: {agg.func!r}")
 
     def _numeric(self, expr: object) -> str:
-        return f"({self._expr_sql(expr)})::numeric"
+        sql = self._expr_sql(expr)
+        if isinstance(expr, FieldAccess):
+            return f"({sql})::numeric"
+        return sql
 
     def _sort_key_sql(self, key: SortKey) -> str:
         # sort_asc/sort_desc pass a Literal string alias — output unquoted

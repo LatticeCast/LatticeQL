@@ -15,12 +15,14 @@ from .ast import (
     Literal,
     MatchArm,
     MatchExpr,
+    ParamExpr,
     PipeExpr,
     Query,
     SortKey,
     SortStage,
     TableStage,
     UnaryOp,
+    WithColumnStage,
 )
 from .error import SchemaError
 from .schema import Schema
@@ -32,15 +34,29 @@ class Resolver:
     def __init__(self, schema: Schema) -> None:
         self._schema = schema
         self._current_table: str | None = None
+        self._in_having: bool = False
+        self._virtual_cols: dict[str, object] = {}
 
     def resolve(self, query: Query) -> Query:
-        # first stage must be table(...)
         if not query.stages or not isinstance(query.stages[0], TableStage):
             raise SchemaError("Query must start with table(...)")
         self._current_table = query.stages[0].name
         if self._schema.lookup_table(self._current_table) is None:
             raise SchemaError(f"Unknown table: {self._current_table!r}")
-        resolved = [self._stage(s) for s in query.stages]
+
+        seen_aggregate = False
+        resolved = []
+        for stage in query.stages:
+            if isinstance(stage, (FilterStage, HavingStage)) and (
+                seen_aggregate or isinstance(stage, HavingStage)
+            ):
+                self._in_having = True
+                resolved.append(self._stage(stage))
+                self._in_having = False
+            else:
+                resolved.append(self._stage(stage))
+            if isinstance(stage, AggregateStage):
+                seen_aggregate = True
         return Query(stages=resolved)
 
     def _stage(self, stage: object) -> object:
@@ -62,6 +78,13 @@ class Resolver:
             return SortStage(keys=[SortKey(self._expr(k.expr), k.desc) for k in stage.keys])
         if isinstance(stage, LimitStage):
             return stage
+        if isinstance(stage, WithColumnStage):
+            resolved_body = self._expr(stage.lambda_.body)
+            self._virtual_cols[stage.name] = resolved_body
+            return WithColumnStage(
+                name=stage.name,
+                lambda_=Lambda(param=stage.lambda_.param, body=resolved_body),
+            )
         raise SchemaError(f"Unknown stage type: {type(stage)}")
 
     def _lambda(self, lam: Lambda) -> Lambda:
@@ -76,6 +99,10 @@ class Resolver:
 
     def _expr(self, expr: object) -> object:
         if isinstance(expr, FieldAccess):
+            if self._in_having:
+                return expr  # aggregate alias reference — skip schema lookup
+            if expr.field in self._virtual_cols:
+                return expr  # virtual column — codegen will inline
             col = self._schema.lookup_column(self._current_table, expr.field)  # type: ignore[arg-type]
             if col is None:
                 raise SchemaError(
@@ -102,6 +129,8 @@ class Resolver:
         if isinstance(expr, FuncCall):
             return self._func(expr)
         if isinstance(expr, Literal):
+            return expr
+        if isinstance(expr, ParamExpr):
             return expr
         raise SchemaError(f"Unknown expr type: {type(expr)}")
 

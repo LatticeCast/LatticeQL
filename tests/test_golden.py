@@ -16,13 +16,7 @@ import lattice_ql
 EXAMPLES_DIR = Path(__file__).parent.parent / "_site" / "examples"
 SCHEMA_PATH = EXAMPLES_DIR / "_schema.json"
 
-# These goldens need features not yet implemented in v0.1 scaffold.
-# Remove entries here as each feature lands.
-XFAIL = {
-    "060_having.lql",  # HAVING via filter-after-aggregate (resolver context)
-    "090_match_with_column.lql",  # with_column stage
-    "110_sprint_health_completion.lql",  # variable binding, $params
-}
+XFAIL: set[str] = set()
 
 
 def _schema() -> dict:
