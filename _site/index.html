@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en" class="h-full overflow-hidden">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LatticeQL Playground</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: { bg:'#0d1117', panel:'#161b22', bdr:'#30363d', ctrl:'#21262d',
+                  hi:'#58a6ff', err:'#f85149', ok:'#238636', okb:'#2ea043' },
+        fontFamily: { mono:['"JetBrains Mono"','"Fira Code"','monospace'] }
+      }}
+    };
+  </script>
+  <style>
+    textarea:focus{outline:none}
+    ::-webkit-scrollbar{width:6px;height:6px}
+    ::-webkit-scrollbar-track{background:transparent}
+    ::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
+  </style>
+</head>
+<body class="bg-bg flex h-full flex-col overflow-hidden font-sans text-[#c9d1d9]">
+
+<!-- Header -->
+<header class="bg-panel border-bdr flex shrink-0 items-center gap-4 border-b px-5 py-3">
+  <h1 class="text-lg font-semibold">LatticeQL Playground</h1>
+  <span id="status" class="text-xs text-[#8b949e] italic">Loading WASM...</span>
+  <a class="hover:text-hi ml-auto flex items-center gap-1.5 text-[13px] text-[#8b949e] no-underline transition-colors"
+     href="https://github.com/LatticeCast/LatticeQL" target="_blank" rel="noopener">
+    <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/>
+    </svg>
+    https://github.com/LatticeCast/LatticeQL
+  </a>
+  <select id="examples" class="bg-ctrl border-bdr rounded-md border px-3 py-1 text-[13px] text-[#c9d1d9]"></select>
+  <button id="run-btn" onclick="compile()"
+    class="bg-ok border-okb hover:bg-okb cursor-pointer rounded-md border px-4 py-1 text-[13px] font-semibold text-white transition-colors">
+    Compile
+  </button>
+</header>
+
+<!-- Panels -->
+<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+  <div class="flex min-h-0 flex-1 overflow-hidden">
+    <div class="flex h-full min-w-0 flex-col overflow-hidden" id="left" style="flex:1 1 50%">
+      <div class="bg-panel border-bdr flex h-9 shrink-0 items-center border-b px-4 text-[13px] font-semibold text-[#8b949e]">
+        LatticeQL Source (.lql)
+      </div>
+      <textarea id="input" spellcheck="false"
+        class="bg-bg min-h-0 flex-1 resize-none overflow-auto border-none p-4 font-mono text-sm leading-normal text-[#c9d1d9]"
+      ></textarea>
+    </div>
+    <div id="divider" class="bg-bdr hover:bg-hi w-1.5 shrink-0 cursor-col-resize self-stretch transition-colors"></div>
+    <div class="flex h-full min-w-0 flex-col overflow-hidden" id="right" style="flex:1 1 50%">
+      <div class="bg-panel border-bdr flex h-9 shrink-0 items-center justify-between border-b px-4 text-[13px] font-semibold text-[#8b949e]">
+        Compiled SQL
+        <button id="copy-btn" onclick="copyOutput()"
+          class="bg-ctrl border-bdr hover:bg-bdr cursor-pointer rounded-md border px-3 py-1 text-xs text-[#c9d1d9] transition-colors">
+          Copy
+        </button>
+      </div>
+      <pre id="output" class="bg-bg m-0 min-h-0 flex-1 overflow-auto p-4 font-mono text-sm leading-snug whitespace-pre"></pre>
+    </div>
+  </div>
+
+  <!-- Status Log Panel -->
+  <div id="log-panel" class="border-bdr shrink-0 border-t" style="display:none">
+    <div class="bg-panel flex h-8 cursor-pointer items-center justify-between px-4 text-[13px] font-semibold text-[#8b949e]"
+         id="log-header" onclick="toggleLog()">
+      <span>Status Log</span>
+      <span id="log-toggle" class="text-xs">−</span>
+    </div>
+    <pre id="log-body" class="bg-bg m-0 overflow-auto p-3 font-mono text-xs leading-relaxed text-[#8b949e]" style="max-height:160px"></pre>
+  </div>
+</div>
+
+<script>
+// Examples (loaded from _site/examples/*.lql)
+const EXAMPLE_NAMES = [
+  '010_count', '020_filter_eq', '030_filter_gin_flatten', '040_group_count',
+  '050_aggregate_named', '060_having', '070_bucket_month', '080_sort_limit',
+  '090_match_with_column', '100_sum_if', '110_sprint_health_completion'
+];
+const EXAMPLES = {};
+let SCHEMA_JSON = '{}';
+
+async function loadExamples() {
+  await Promise.all(EXAMPLE_NAMES.map(async name => {
+    try {
+      const resp = await fetch(`examples/${name}.lql`);
+      if (resp.ok) EXAMPLES[name] = await resp.text();
+    } catch(e) { console.warn(`Failed to load example: ${name}`, e); }
+  }));
+  const sel = document.getElementById('examples');
+  EXAMPLE_NAMES.forEach(n => {
+    if (EXAMPLES[n]) {
+      const opt = document.createElement('option');
+      opt.value = n; opt.textContent = n;
+      sel.appendChild(opt);
+    }
+  });
+}
+
+async function loadSchema() {
+  try {
+    const resp = await fetch('examples/_schema.json');
+    if (resp.ok) SCHEMA_JSON = (await resp.text()).trim();
+  } catch(e) { console.warn('Failed to load schema', e); }
+}
+
+// DOM
+const $ = id => document.getElementById(id);
+const input = $('input'), output = $('output'), status = $('status');
+const left = $('left'), right = $('right'), divider = $('divider');
+const logPanel = $('log-panel'), logBody = $('log-body'), logToggle = $('log-toggle');
+let wasmBytes = null;
+let logCollapsed = false;
+
+// Status Log
+function logClear() { logBody.textContent = ''; logPanel.style.display = 'none'; }
+function logShow() { logPanel.style.display = ''; if (logCollapsed) { logCollapsed = false; logBody.style.display = ''; logToggle.textContent = '−'; } }
+function log(msg) {
+  logShow();
+  const ts = new Date().toLocaleTimeString('en', {hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  logBody.textContent += `[${ts}] ${msg}\n`;
+  logBody.scrollTop = logBody.scrollHeight;
+}
+window.toggleLog = () => {
+  logCollapsed = !logCollapsed;
+  logBody.style.display = logCollapsed ? 'none' : '';
+  logToggle.textContent = logCollapsed ? '+' : '−';
+};
+
+// Load WASM
+async function load() {
+  try {
+    const [wasmResp, verResp] = await Promise.all([
+      fetch('lattice-ql.wasm'),
+      fetch('version.txt').catch(() => null)
+    ]);
+    if (!wasmResp.ok) throw new Error('lattice-ql.wasm not found');
+    wasmBytes = await wasmResp.arrayBuffer();
+    const ver = (verResp && verResp.ok) ? (await verResp.text()).trim() : '';
+    status.textContent = ver ? `lattice-ql ${ver}` : 'Ready';
+    status.style.fontStyle = 'normal';
+  } catch(e) {
+    console.error('WASM load failed:', e);
+    status.textContent = 'WASM not loaded';
+    status.style.fontStyle = 'normal';
+  }
+}
+
+class WasiExit { constructor(code) { this.code = code; } }
+
+// Compile .lql -> SQL via WASM (fresh instance each time)
+function compileLql(src) {
+  if (!wasmBytes) return null;
+
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const stdinBuf = encoder.encode(src);
+  let stdinPos = 0;
+  const stdoutBuf = [];
+  const stderrBuf = [];
+  let inst = null;
+
+  // CLI args: argv[0] = "lattice-ql", then "--schema-json", "<json>"
+  const argv = ['lattice-ql', '--schema-json', SCHEMA_JSON];
+  const argvBytes = argv.map(a => encoder.encode(a + '\0'));
+  const argvBufSize = argvBytes.reduce((s, b) => s + b.length, 0);
+
+  const wasi = {
+    fd_write(fd, iovs_ptr, iovs_len, nwritten_ptr) {
+      const mem = new DataView(inst.exports.memory.buffer);
+      const mem8 = new Uint8Array(inst.exports.memory.buffer);
+      let written = 0;
+      for (let i = 0; i < iovs_len; i++) {
+        const ptr = mem.getUint32(iovs_ptr + i * 8, true);
+        const len = mem.getUint32(iovs_ptr + i * 8 + 4, true);
+        const chunk = mem8.slice(ptr, ptr + len);
+        if (fd === 1) stdoutBuf.push(decoder.decode(chunk));
+        else if (fd === 2) stderrBuf.push(decoder.decode(chunk));
+        written += len;
+      }
+      mem.setUint32(nwritten_ptr, written, true);
+      return 0;
+    },
+    fd_read(fd, iovs_ptr, iovs_len, nread_ptr) {
+      const mem = new DataView(inst.exports.memory.buffer);
+      const mem8 = new Uint8Array(inst.exports.memory.buffer);
+      let totalRead = 0;
+      for (let i = 0; i < iovs_len; i++) {
+        const ptr = mem.getUint32(iovs_ptr + i * 8, true);
+        const len = mem.getUint32(iovs_ptr + i * 8 + 4, true);
+        const remaining = stdinBuf.length - stdinPos;
+        const toRead = Math.min(len, remaining);
+        mem8.set(stdinBuf.subarray(stdinPos, stdinPos + toRead), ptr);
+        stdinPos += toRead;
+        totalRead += toRead;
+        if (toRead < len) break;
+      }
+      mem.setUint32(nread_ptr, totalRead, true);
+      return 0;
+    },
+    fd_close() { return 0; },
+    fd_seek() { return 0; },
+    fd_fdstat_get(fd, buf) {
+      const mem = new DataView(inst.exports.memory.buffer);
+      mem.setUint8(buf, 4);
+      mem.setUint16(buf + 2, 0, true);
+      mem.setBigUint64(buf + 8, 0n, true);
+      mem.setBigUint64(buf + 16, 0n, true);
+      return 0;
+    },
+    fd_fdstat_set_flags() { return 0; },
+    fd_advise() { return 0; },
+    fd_allocate() { return 0; },
+    fd_datasync() { return 0; },
+    fd_sync() { return 0; },
+    fd_filestat_get() { return 0; },
+    fd_filestat_set_size() { return 0; },
+    fd_filestat_set_times() { return 0; },
+    fd_pread() { return 0; },
+    fd_pwrite() { return 0; },
+    fd_readdir() { return 0; },
+    fd_renumber() { return 0; },
+    path_create_directory() { return 0; },
+    path_filestat_get() { return 0; },
+    path_filestat_set_times() { return 0; },
+    path_link() { return 0; },
+    path_open() { return 0; },
+    path_readlink() { return 0; },
+    path_remove_directory() { return 0; },
+    path_rename() { return 0; },
+    path_symlink() { return 0; },
+    path_unlink_file() { return 0; },
+    poll_oneoff() { return 0; },
+    sched_yield() { return 0; },
+    sock_accept() { return 0; },
+    sock_recv() { return 0; },
+    sock_send() { return 0; },
+    sock_shutdown() { return 0; },
+    fd_prestat_get() { return 8; },
+    fd_prestat_dir_name() { return 8; },
+    environ_get() { return 0; },
+    environ_sizes_get(count_ptr, size_ptr) {
+      const mem = new DataView(inst.exports.memory.buffer);
+      mem.setUint32(count_ptr, 0, true);
+      mem.setUint32(size_ptr, 0, true);
+      return 0;
+    },
+    args_get(argv_ptr, argv_buf_ptr) {
+      const mem = new DataView(inst.exports.memory.buffer);
+      const mem8 = new Uint8Array(inst.exports.memory.buffer);
+      let bufOff = 0;
+      for (let i = 0; i < argvBytes.length; i++) {
+        mem.setUint32(argv_ptr + i * 4, argv_buf_ptr + bufOff, true);
+        mem8.set(argvBytes[i], argv_buf_ptr + bufOff);
+        bufOff += argvBytes[i].length;
+      }
+      return 0;
+    },
+    args_sizes_get(argc_ptr, argv_buf_size_ptr) {
+      const mem = new DataView(inst.exports.memory.buffer);
+      mem.setUint32(argc_ptr, argv.length, true);
+      mem.setUint32(argv_buf_size_ptr, argvBufSize, true);
+      return 0;
+    },
+    clock_time_get() { return 0; },
+    proc_exit(code) { throw new WasiExit(code); },
+    random_get(buf, len) {
+      const mem8 = new Uint8Array(inst.exports.memory.buffer);
+      crypto.getRandomValues(mem8.subarray(buf, buf + len));
+      return 0;
+    },
+  };
+
+  const mod = new WebAssembly.Module(wasmBytes);
+  inst = new WebAssembly.Instance(mod, { wasi_snapshot_preview1: wasi });
+
+  let exitCode = 0;
+  try { inst.exports._start(); }
+  catch(e) {
+    if (e instanceof WasiExit) exitCode = e.code;
+    else throw e;
+  }
+
+  return { stdout: stdoutBuf.join(''), stderr: stderrBuf.join(''), exitCode };
+}
+
+// Compile button
+async function compile() {
+  const btn = $('run-btn');
+  btn.textContent = 'Compiling...';
+  btn.disabled = true;
+  output.textContent = '';
+  output.classList.remove('text-err');
+  logClear();
+
+  const lqlSrc = input.value;
+
+  try {
+    log('Compiling LatticeQL → SQL via WASM...');
+    const result = compileLql(lqlSrc);
+
+    if (result === null) {
+      log('ERROR: WASM compiler not loaded');
+      output.textContent = 'Compiler WASM not loaded. Build with:\n  docker buildx build -f Dockerfile.wasm --output type=local,dest=./wasm-out .\n  cp wasm-out/lattice-ql.wasm _site/';
+      output.classList.add('text-err');
+      return;
+    }
+
+    if (result.stderr) log('stderr: ' + result.stderr.trim());
+
+    if (result.exitCode !== 0 || (!result.stdout && result.stderr)) {
+      log('ERROR: Compilation failed (exit ' + result.exitCode + ')');
+      output.textContent = result.stderr || '(compiler exited ' + result.exitCode + ' with no output)';
+      output.classList.add('text-err');
+      return;
+    }
+
+    log('Compilation OK (' + result.stdout.length + ' bytes of SQL)');
+    output.textContent = result.stdout;
+    output.classList.remove('text-err');
+  } catch(e) {
+    log('ERROR: ' + e.message);
+    output.textContent = 'Error: ' + e.message;
+    output.classList.add('text-err');
+  } finally {
+    btn.textContent = 'Compile';
+    btn.disabled = false;
+  }
+}
+
+// Example selector
+$('examples').addEventListener('change', (e) => {
+  const ex = EXAMPLES[e.target.value];
+  if (ex) input.value = ex;
+});
+
+// Copy output
+window.copyOutput = () => {
+  if (output.textContent) {
+    navigator.clipboard.writeText(output.textContent).then(() => {
+      const btn = $('copy-btn');
+      btn.textContent = 'Copied!';
+      btn.classList.add('bg-ok','border-okb','text-white');
+      setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('bg-ok','border-okb','text-white'); }, 1500);
+    });
+  }
+};
+
+// Keyboard shortcut
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); compile(); }
+});
+
+// Draggable divider
+let dragging = false;
+divider.addEventListener('mousedown', e => { e.preventDefault(); dragging = true; divider.classList.replace('bg-bdr','bg-hi'); document.body.style.cssText = 'cursor:col-resize;user-select:none'; });
+document.addEventListener('mousemove', e => { if (!dragging) return; const r = divider.parentElement.getBoundingClientRect(); const pct = Math.max(15, Math.min(85, (e.clientX - r.left) / r.width * 100)); left.style.flex = `0 0 ${pct}%`; right.style.flex = `0 0 ${100 - pct}%`; });
+document.addEventListener('mouseup', () => { if (!dragging) return; dragging = false; divider.classList.replace('bg-hi','bg-bdr'); document.body.style.cssText = ''; });
+
+// Init
+(async () => {
+  await Promise.all([load(), loadExamples(), loadSchema()]);
+  const first = EXAMPLE_NAMES.find(n => EXAMPLES[n]);
+  if (first) input.value = EXAMPLES[first];
+})();
+</script>
+</body>
+</html>

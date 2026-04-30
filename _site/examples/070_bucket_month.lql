@@ -1,0 +1,4 @@
+table("Tasks")
+  | group_by((r) -> { r.created_at | bucket("month") })
+  | aggregate(count())
+  | sort_asc("dim_0")

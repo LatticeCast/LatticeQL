@@ -1,0 +1,7 @@
+table("Tasks")
+  | filter((r) -> {
+      r.status == "in_progress"
+      and r.priority == "high"
+      and r.assignee == "claude"
+    })
+  | aggregate(count())

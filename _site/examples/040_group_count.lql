@@ -1,0 +1,4 @@
+table("Tasks")
+  | filter((r) -> { r.status != "merged" })
+  | group_by((r) -> { r.priority })
+  | aggregate(count())

@@ -1,0 +1,7 @@
+table("Deals")
+  | group_by((r) -> { r.owner })
+  | aggregate(@{
+      "won_count":  count_if((r) -> { r.status == "won" }),
+      "won_value":  sum_if((r) -> { r.status == "won" }, r.amount),
+      "open_value": sum_if((r) -> { r.status == "open" }, r.amount)
+    })

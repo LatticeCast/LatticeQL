@@ -1,0 +1,41 @@
+# LatticeQL v{{ __VERSION__ }} — User Guide for Writing .lql Code
+
+You are writing .lql code for a LatticeCast dashboard panel.
+Think of .lql as "pipe-style query DSL that compiles to parameterized PostgreSQL JSONB SQL."
+
+## Quick Start
+
+```bash
+lattice-ql panel.lql --schema schema.json -o panel.sql --emit-params
+```
+
+One file = one panel. Pipe stages read top-to-bottom.
+
+## Anatomy
+
+```latticeql
+table("Tasks")                              // 1. source — by name, never UUID
+  | filter((r) -> { r.status == "todo" })   // 2. WHERE — flat ==/and chains hit GIN
+  | group_by((r) -> { r.priority })          // 3. GROUP BY — positional dim_N or named
+  | aggregate(count())                       // 4. measure — count/sum/avg/percentile/*_if
+  | sort_desc("measure")                     // 5. ORDER BY
+  | limit(10)                                // 6. LIMIT
+```
+
+## Five rules for fast LatticeQL
+
+1. **Filter with flat `==`-and-`and` chains** → compiler flattens to a single `@>`, GIN handles all keys in one shot.
+2. **`filter` position decides WHERE vs HAVING** → before `aggregate` is row-level (`r`); after is group-level (`g.measure`).
+3. **All time is UTC** → no `at_timezone`; all `bucket("day"|"week"|"month"|...)` boundaries are UTC; frontend handles display.
+4. **Hoist shared filters with `:=`** → multiple panels share a base; each compiles to independent SQL for parallel execution.
+5. **Reach for `*_if` over post-`filter`** when you need multiple conditional measures in one query — one scan, many measures.
+
+## What's rejected at compile time
+
+- Mutation, loops, unbounded recursion, side effects
+- String interpolation `${...}` (SQL injection vector — use `concat()`)
+- Cross-workspace queries
+- Local-timezone literals (all time is UTC)
+- Joins beyond depth cap (default 3)
+
+See `README.md` for the full language reference.

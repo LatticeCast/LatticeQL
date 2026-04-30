@@ -1,0 +1,3 @@
+table("Tasks")
+  | filter((r) -> { r.status == "todo" })
+  | aggregate(count())

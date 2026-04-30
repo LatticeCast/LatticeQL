@@ -1,0 +1,10 @@
+table("Tasks")
+  | with_column("urgency", (r) -> {
+      match r.priority {
+        "critical" -> 100
+        "high"     -> 50
+        _          -> 0
+      }
+    })
+  | group_by((r) -> { r.assignee })
+  | aggregate(@{ "avg_urgency": avg(r.urgency) })

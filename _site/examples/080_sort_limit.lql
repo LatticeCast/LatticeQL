@@ -1,0 +1,6 @@
+table("Tasks")
+  | filter((r) -> { r.status in @["todo", "in_progress", "testing"] })
+  | group_by((r) -> { r.assignee })
+  | aggregate(@{ "tickets": count(), "workload": sum(r.estimate) })
+  | sort_desc("workload")
+  | limit(10)

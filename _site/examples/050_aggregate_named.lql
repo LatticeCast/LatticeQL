@@ -1,0 +1,8 @@
+table("Tasks")
+  | filter((r) -> { r.type == "task" })
+  | group_by((r) -> { r.priority })
+  | aggregate(@{
+      "count":     count(),
+      "avg_pts":   avg(r.estimate),
+      "total_pts": sum(r.estimate)
+    })

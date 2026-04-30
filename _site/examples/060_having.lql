@@ -1,0 +1,4 @@
+table("Tasks")
+  | group_by((r) -> { r.priority })
+  | aggregate(count())
+  | filter((g) -> { g.measure > 5 })

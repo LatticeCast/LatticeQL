@@ -1,0 +1,8 @@
+sprint_all := table("Tasks")
+  | filter((r) -> { r.sprint == $sprint })
+
+sprint_all
+  | aggregate(@{
+      "rate": avg_if((r) -> { r.status in @["done", "merged"] },
+                     match r.status { "done" -> 1; "merged" -> 1; _ -> 0 })
+    })
