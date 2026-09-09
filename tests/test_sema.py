@@ -367,6 +367,30 @@ def test_bucket_on_date_column_ok() -> None:
     _sema(q)  # must not raise
 
 
+def test_bucket_on_datetime_column_ok() -> None:
+    """bucket on datetime column → no error."""
+    schema = Schema.from_dict(
+        {
+            "Events": {
+                "table_id": "tbl-events",
+                "columns": {"started_at": {"id": "col-started-at", "type": "datetime"}},
+            }
+        }
+    )
+    pipe = PipeExpr(
+        left=_fa("col-started-at"),
+        right=FuncCall(name="bucket", args=[Literal("hour")]),
+    )
+    q = Query(
+        stages=[
+            TableStage(name="Events"),
+            GroupByStage(dims=[_lam(pipe)]),
+            AggregateStage(measures=AggExpr(func="count", args=[])),
+        ]
+    )
+    Sema(schema).transform(q)  # must not raise
+
+
 def test_bucket_on_text_column_raises() -> None:
     """bucket on text column → SemaError mentioning 'date'."""
     pipe = PipeExpr(

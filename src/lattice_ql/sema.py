@@ -104,9 +104,9 @@ class Sema:
             and isinstance(expr.left, FieldAccess)
         ):
             kind = self._col_kind.get(expr.left.field)
-            if kind is not None and kind != ColumnKind.date:
+            if kind is not None and kind not in (ColumnKind.date, ColumnKind.datetime):
                 raise SemaError(
-                    f"bucket() requires a 'date' column,"
+                    f"bucket() requires a 'date' or 'datetime' column,"
                     f" but column {expr.left.field!r} has type {kind.value!r}"
                 )
 

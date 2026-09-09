@@ -15,6 +15,7 @@ class ColumnKind(str, Enum):
     tags = "tags"
     number = "number"
     date = "date"
+    datetime = "datetime"
     bool = "bool"
     url = "url"
     doc = "doc"

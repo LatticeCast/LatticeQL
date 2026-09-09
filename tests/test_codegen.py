@@ -232,7 +232,11 @@ def test_group_by_bucket_expression_single_space():
         AggregateStage(measures=AggExpr("count", [])),
     )
     sql = _cg(q)
-    prefix = "date_trunc('month', (row_data->>'col-created-at')::timestamptz AT TIME ZONE 'UTC')"
+    prefix = (
+        "date_trunc('month', "
+        "to_timestamp((row_data->>'col-created-at')::double precision / 1000.0) "
+        "AT TIME ZONE 'UTC')"
+    )
     assert f"{prefix} AS dim_0" in sql
 
 

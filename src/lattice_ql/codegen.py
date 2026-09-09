@@ -245,7 +245,13 @@ class Codegen:
         if isinstance(expr.right, FuncCall) and expr.right.name == "bucket":
             unit = str(expr.right.args[0].value)  # type: ignore[union-attr]
             inner = self._expr_sql(expr.left)
-            return f"date_trunc('{unit}', ({inner})::timestamptz AT TIME ZONE 'UTC')"
+            # LatticeCast stores JSONB temporal cells as UTC epoch milliseconds,
+            # not ISO timestamp strings. Convert milliseconds to a timestamptz
+            # before choosing a UTC calendar bucket.
+            return (
+                f"date_trunc('{unit}', "
+                f"to_timestamp(({inner})::double precision / 1000.0) AT TIME ZONE 'UTC')"
+            )
         raise CodegenError(f"Cannot pipe into {expr.right!r}")
 
     def _match_sql(self, expr: MatchExpr) -> str:
