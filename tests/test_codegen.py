@@ -34,8 +34,20 @@ from lattice_ql.error import CodegenError
 from lattice_ql.schema import Schema
 
 
+# Codegen needs the schema to know a table's id: it emits that id directly
+# instead of resolving the name through a `tables.table_name` column, which
+# neither this compiler's schema format nor LatticeCast's database has. The
+# ids match _site/examples/_schema.json so the goldens and these tests agree.
+_SCHEMA = Schema.from_dict(
+    {
+        "Tasks": {"table_id": "tbl-tasks", "columns": {}},
+        "Deals": {"table_id": "tbl-deals", "columns": {}},
+    }
+)
+
+
 def _cg(query: Query) -> str:
-    return Codegen(Schema.empty()).generate(query)
+    return Codegen(_SCHEMA).generate(query)
 
 
 def _q(*stages) -> Query:
@@ -60,8 +72,7 @@ def test_count_all():
     expected = (
         "SELECT COUNT(*) AS measure\n"
         "FROM rows\n"
-        "WHERE table_id = (SELECT table_id FROM tables"
-        " WHERE table_name = 'Tasks' AND workspace_id = $1);"
+        "WHERE table_id = 'tbl-tasks' AND workspace_id = $1;"
     )
     assert _cg(q) == expected
 
@@ -71,9 +82,19 @@ def test_workspace_id_always_dollar_one():
     assert "workspace_id = $1" in _cg(q)
 
 
-def test_table_name_in_from_clause():
+def test_table_id_from_schema_in_from_clause():
+    # The FROM clause carries the schema's table_id, not the name it was
+    # addressed by. These differ here on purpose: 'Deals' -> 'tbl-deals'.
     q = _q(TableStage("Deals"), AggregateStage(measures=AggExpr("count", [])))
-    assert "table_name = 'Deals'" in _cg(q)
+    sql = _cg(q)
+    assert "table_id = 'tbl-deals'" in sql
+    assert "table_name" not in sql
+
+
+def test_unknown_table_is_a_codegen_error():
+    q = _q(TableStage("Nope"), AggregateStage(measures=AggExpr("count", [])))
+    with pytest.raises(CodegenError):
+        _cg(q)
 
 
 def test_ends_with_semicolon():

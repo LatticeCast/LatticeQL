@@ -71,6 +71,11 @@ class Codegen:
                 raise CodegenError(f"Unknown stage: {type(stage)}")
 
         table_name = table_stage.name
+        table_meta = self._schema.lookup_table(table_name)
+        if table_meta is None:
+            # The resolver rejects an unknown table before codegen runs, so
+            # this is a guard against a caller wiring the stages by hand.
+            raise CodegenError(f"Unknown table: {table_name!r}")
         parts: list[str] = []
 
         # SELECT — raw-field dims get 2 spaces before AS, expression dims get 1;
@@ -100,10 +105,13 @@ class Codegen:
             parts.append("\n".join(lines))
 
         # FROM + base WHERE
+        # The schema already carries table_id, so use it. Resolving the name
+        # through `tables.table_name` at query time asked for a column that
+        # this compiler's own schema format never claimed exists -- and does
+        # not exist in LatticeCast, where a table is keyed by
+        # (workspace_id, table_id) and has no name column at all.
         parts.append(
-            f"FROM rows\n"
-            f"WHERE table_id = (SELECT table_id FROM tables"
-            f" WHERE table_name = '{table_name}' AND workspace_id = $1)"
+            f"FROM rows\nWHERE table_id = '{table_meta.table_id}' AND workspace_id = $1"
         )
 
         # pre-aggregate filters → WHERE AND clauses
