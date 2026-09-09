@@ -426,7 +426,11 @@ def test_having_stage():
         HavingStage(_lam(BinOp(">", _fa("measure"), Literal(5)))),
     )
     sql = _cg(q)
-    assert "HAVING (measure) > (5)" in sql
+    # The aggregate expression, not the SELECT alias: Postgres does not
+    # resolve output-column names in HAVING, so "HAVING (measure) > (5)"
+    # fails with `column "measure" does not exist`.
+    assert "HAVING (COUNT(*)) > (5)" in sql
+    assert "HAVING (measure)" not in sql
 
 
 def test_post_aggregate_filter_becomes_having():
@@ -681,3 +685,43 @@ def test_multi_select_aligned_with_commas():
     assert lines[1].endswith(",")
     # last select line does NOT end with ","
     assert not lines[2].endswith(",")
+
+
+def test_having_resolves_a_named_measure_alias():
+    """A dict measure's key is an alias too, and equally invisible to HAVING."""
+    q = _q(
+        TableStage("Tasks"),
+        GroupByStage(dims=[_lam(_fa("col-priority"))]),
+        AggregateStage(measures={"total": AggExpr("count", [])}),
+        HavingStage(_lam(BinOp(">", _fa("total"), Literal(3)))),
+    )
+    sql = _cg(q)
+    assert "HAVING (COUNT(*)) > (3)" in sql
+    assert "HAVING (total)" not in sql
+
+
+def test_having_resolves_a_grouped_dimension_alias():
+    """Dimension aliases are unavailable in HAVING for the same reason."""
+    q = _q(
+        TableStage("Tasks"),
+        GroupByStage(dims={"prio": _lam(_fa("col-priority"))}),
+        AggregateStage(measures=AggExpr("count", [])),
+        HavingStage(_lam(BinOp("!=", _fa("prio"), Literal("low")))),
+    )
+    sql = _cg(q)
+    assert "HAVING (row_data->>'col-priority')" in sql
+    assert "HAVING (prio)" not in sql
+
+
+def test_post_filter_and_having_emit_one_having_clause():
+    """Two sources of post-aggregate conditions must not emit two HAVINGs."""
+    q = _q(
+        TableStage("Tasks"),
+        GroupByStage(dims=[_lam(_fa("col-priority"))]),
+        AggregateStage(measures=AggExpr("count", [])),
+        FilterStage(_lam(BinOp(">", _fa("measure"), Literal(1)))),
+        HavingStage(_lam(BinOp("<", _fa("measure"), Literal(9)))),
+    )
+    sql = _cg(q)
+    assert sql.count("HAVING") == 1
+    assert "HAVING (COUNT(*)) > (1) AND (COUNT(*)) < (9)" in sql

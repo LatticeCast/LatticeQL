@@ -33,6 +33,7 @@ class Codegen:
         self._schema = schema
         self._virtual_cols: dict[str, object] = {}
         self._param_names: list[str] = []
+        self._having_aliases: dict[str, str] = {}
 
     def generate(self, query: Query) -> str:
         table_stage: TableStage = query.stages[0]  # type: ignore[assignment]
@@ -104,6 +105,20 @@ class Codegen:
             lines.append(f"{indent}{select_parts[-1]}")
             parts.append("\n".join(lines))
 
+        # Postgres resolves output-column aliases in GROUP BY and ORDER BY but
+        # NOT in HAVING, where only the underlying expressions are in scope. So
+        # record what each alias stands for; HAVING emits that instead.
+        self._having_aliases = {}
+        if group_by is not None:
+            for alias, dim_sql, _ in self._dim_exprs(group_by):
+                self._having_aliases[alias] = dim_sql
+        if aggregate is not None:
+            if isinstance(aggregate.measures, dict):
+                for name, agg in aggregate.measures.items():
+                    self._having_aliases[name] = self._agg_sql(agg)
+            else:
+                self._having_aliases["measure"] = self._agg_sql(aggregate.measures)
+
         # FROM + base WHERE
         # The schema already carries table_id, so use it. Resolving the name
         # through `tables.table_name` at query time asked for a column that
@@ -123,11 +138,14 @@ class Codegen:
             aliases = [alias for alias, _, _ in self._dim_exprs(group_by)]
             parts.append("GROUP BY " + ", ".join(aliases))
 
-        # post-aggregate filters → HAVING
-        for f in post_filters:
-            parts.append(f"HAVING {self._having_cond(f.lambda_)}")
+        # post-aggregate filters and having() → a single HAVING clause. One
+        # clause per source emitted `HAVING a HAVING b`, which is a syntax
+        # error, so the conditions are ANDed together.
+        having_conds = [self._having_cond(f.lambda_) for f in post_filters]
         if having is not None:
-            parts.append(f"HAVING {self._having_cond(having.lambda_)}")
+            having_conds.append(self._having_cond(having.lambda_))
+        if having_conds:
+            parts.append("HAVING " + " AND ".join(having_conds))
 
         # ORDER BY (only when explicitly requested)
         if sort is not None:
@@ -161,14 +179,20 @@ class Codegen:
         return self._having_expr_sql(lam.body)
 
     def _having_expr_sql(self, expr: object) -> str:
-        """Expression SQL in HAVING context: FieldAccess refers to aggregate alias."""
+        """Expression SQL in HAVING context.
+
+        A FieldAccess here names a SELECT alias, which HAVING cannot see, so
+        it resolves to the dimension or aggregate expression behind it.
+        """
         if isinstance(expr, BinOp):
             op = self._sql_op(expr.op)
             left = f"({self._having_expr_sql(expr.left)})"
             right = f"({self._having_expr_sql(expr.right)})"
             return f"{left} {op} {right}"
         if isinstance(expr, FieldAccess):
-            return expr.field  # aggregate alias name
+            resolved = self._having_aliases.get(expr.field)
+            if resolved is not None:
+                return resolved
         return self._expr_sql(expr)
 
     # ------------------------------------------------------------------
