@@ -69,7 +69,7 @@ def test_cli_schema_file(tmp_path: Path) -> None:
     assert "COUNT(*)" in result.stdout
     # The FROM clause carries the schema's table_id, not the name the
     # query addressed it by, so assert the id.
-    assert "tbl-tasks" in result.stdout
+    assert "101" in result.stdout
     assert "Tasks" not in result.stdout
 
 

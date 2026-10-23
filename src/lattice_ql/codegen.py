@@ -105,13 +105,12 @@ class Codegen:
             parts.append("\n".join(lines))
 
         # FROM + base WHERE
-        # The schema already carries table_id, so use it. Resolving the name
-        # through `tables.table_name` at query time asked for a column that
-        # this compiler's own schema format never claimed exists -- and does
-        # not exist in LatticeCast, where a table is keyed by
-        # (workspace_id, table_id) and has no name column at all.
+        # A query names its table; the schema dict is keyed by that name and
+        # carries the numeric identity, which rows are keyed by. int() keeps
+        # the literal numeric so the BIGINT index is used and nothing from the
+        # schema can be injected into the SQL.
         parts.append(
-            f"FROM rows\nWHERE table_id = '{table_meta.table_id}' AND workspace_id = $1"
+            f"FROM rows\nWHERE table_id = {int(table_meta.table_id)} AND workspace_id = $1"
         )
 
         # pre-aggregate filters → WHERE AND clauses

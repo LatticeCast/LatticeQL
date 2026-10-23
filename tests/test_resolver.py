@@ -34,7 +34,7 @@ from lattice_ql.schema import Schema
 
 SCHEMA_DICT = {
     "Tasks": {
-        "table_id": "tbl-tasks",
+        "table_id": 101,
         "columns": {
             "status": {"id": "col-status", "type": "select"},
             "priority": {"id": "col-priority", "type": "select"},
@@ -44,7 +44,7 @@ SCHEMA_DICT = {
         },
     },
     "Deals": {
-        "table_id": "tbl-deals",
+        "table_id": 102,
         "columns": {
             "status": {"id": "col-deal-status", "type": "select"},
             "amount": {"id": "col-deal-amount", "type": "number"},

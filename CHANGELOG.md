@@ -4,6 +4,19 @@ All notable changes to LatticeQL (Python) are documented here.
 
 ---
 
+### v0.4 — 2026-10-23 — tables are addressed by name and identified by a number
+
+- Breaking: `schema["<table_name>"]["table_id"]` is the table's BIGINT identity, not a
+  slug string. `Schema.from_dict` normalises it with `int()` and raises `SchemaError`
+  when it is not numeric, so a stale slug fails loudly instead of compiling.
+- `TableMeta.table_id` is now `int`; queries still name tables (`table("Tasks")`) and the
+  compiler inlines the identity from the schema dict it was handed — no lookup query.
+- `codegen` emits the identity as a bare numeric literal, so the BIGINT primary key is
+  used and nothing from the schema can be injected into the SQL text.
+- Golden examples and the `_site/examples` schema moved from slug ids to numbers.
+
+---
+
 ### v0.1 — 2026-04-30 — Python text-to-text compiler MVP
 
 - Added `pyproject.toml` — `lattice-ql` package, editable install (`pip install -e .`), `lqlc` entry point

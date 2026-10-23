@@ -1,22 +1,52 @@
 {
   "Tasks": {
-    "table_id": "tbl-tasks",
+    "table_id": 101,
     "columns": {
-      "status":     { "id": "col-status",     "type": "select" },
-      "priority":   { "id": "col-priority",   "type": "select" },
-      "type":       { "id": "col-type",       "type": "select" },
-      "assignee":   { "id": "col-assignee",   "type": "text" },
-      "estimate":   { "id": "col-estimate",   "type": "number" },
-      "created_at": { "id": "col-created-at", "type": "date" },
-      "sprint":     { "id": "col-sprint",     "type": "text" }
+      "status": {
+        "id": "col-status",
+        "type": "select"
+      },
+      "priority": {
+        "id": "col-priority",
+        "type": "select"
+      },
+      "type": {
+        "id": "col-type",
+        "type": "select"
+      },
+      "assignee": {
+        "id": "col-assignee",
+        "type": "text"
+      },
+      "estimate": {
+        "id": "col-estimate",
+        "type": "number"
+      },
+      "created_at": {
+        "id": "col-created-at",
+        "type": "date"
+      },
+      "sprint": {
+        "id": "col-sprint",
+        "type": "text"
+      }
     }
   },
   "Deals": {
-    "table_id": "tbl-deals",
+    "table_id": 102,
     "columns": {
-      "status": { "id": "col-deal-status", "type": "select" },
-      "amount": { "id": "col-deal-amount", "type": "number" },
-      "owner":  { "id": "col-deal-owner",  "type": "text" }
+      "status": {
+        "id": "col-deal-status",
+        "type": "select"
+      },
+      "amount": {
+        "id": "col-deal-amount",
+        "type": "number"
+      },
+      "owner": {
+        "id": "col-deal-owner",
+        "type": "text"
+      }
     }
   }
 }

@@ -40,8 +40,8 @@ from lattice_ql.schema import Schema
 # ids match _site/examples/_schema.json so the goldens and these tests agree.
 _SCHEMA = Schema.from_dict(
     {
-        "Tasks": {"table_id": "tbl-tasks", "columns": {}},
-        "Deals": {"table_id": "tbl-deals", "columns": {}},
+        "Tasks": {"table_id": 101, "columns": {}},
+        "Deals": {"table_id": 102, "columns": {}},
     }
 )
 
@@ -72,7 +72,7 @@ def test_count_all():
     expected = (
         "SELECT COUNT(*) AS measure\n"
         "FROM rows\n"
-        "WHERE table_id = 'tbl-tasks' AND workspace_id = $1;"
+        "WHERE table_id = 101 AND workspace_id = $1;"
     )
     assert _cg(q) == expected
 
@@ -84,10 +84,10 @@ def test_workspace_id_always_dollar_one():
 
 def test_table_id_from_schema_in_from_clause():
     # The FROM clause carries the schema's table_id, not the name it was
-    # addressed by. These differ here on purpose: 'Deals' -> 'tbl-deals'.
+    # addressed by. These differ here on purpose: 'Deals' -> 102.
     q = _q(TableStage("Deals"), AggregateStage(measures=AggExpr("count", [])))
     sql = _cg(q)
-    assert "table_id = 'tbl-deals'" in sql
+    assert "table_id = 102" in sql
     assert "table_name" not in sql
 
 

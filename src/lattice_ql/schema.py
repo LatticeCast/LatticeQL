@@ -29,7 +29,9 @@ class ColumnMeta:
 
 @dataclass
 class TableMeta:
-    table_id: str
+    """A table as LQL sees it: addressed by name, identified by its number."""
+
+    table_id: int
     columns: dict[str, ColumnMeta]
 
 
@@ -52,7 +54,14 @@ class Schema:
                 except ValueError as exc:
                     raise SchemaError(f"Unknown column type: {cdata['type']}") from exc
                 cols[col_name] = ColumnMeta(id=cdata["id"], kind=kind)
-            tables[table_name] = TableMeta(table_id=tdata["table_id"], columns=cols)
+            raw_id = tdata.get("table_id")
+            try:
+                table_id = int(raw_id)  # BIGINT identity; strings from JSON are fine
+            except (TypeError, ValueError) as exc:
+                raise SchemaError(
+                    f"Table {table_name!r} carries a non-numeric table_id: {raw_id!r}"
+                ) from exc
+            tables[table_name] = TableMeta(table_id=table_id, columns=cols)
         return cls(tables)
 
     @classmethod

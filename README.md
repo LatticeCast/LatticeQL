@@ -21,7 +21,7 @@ from lattice_ql import compile
 
 schema = {
     "Tasks": {
-        "table_id": "tbl-tasks",
+        "table_id": 42,
         "columns": {
             "status":   {"id": "col-status",   "type": "select"},
             "priority": {"id": "col-priority", "type": "select"}
@@ -64,7 +64,7 @@ Further, by just add dashboard view, it become CRM system. However, the layout i
 
 ### 1.1 Table addressing — by name, never by UUID
 
-LatticeCast stores all rows in a single `rows` table, with `table_id` UUID FK distinguishing logical tables. **LatticeQL never exposes the UUID.**
+LatticeCast stores all rows in a single `rows` table, where `table_id` is the table's BIGINT identity. **LatticeQL never exposes that number**: queries name tables, and the compiler inlines the id from the schema dict it was handed.
 
 ```latticeql
 table("Tasks")
@@ -74,10 +74,8 @@ Compiles to:
 
 ```sql
 FROM rows
-WHERE table_id = (
-  SELECT table_id FROM tables
-  WHERE table_name = 'Tasks' AND workspace_id = $workspace_id
-)
+WHERE table_id = 42   -- inlined from schema["Tasks"]["table_id"]
+  AND workspace_id = $workspace_id
 ```
 
 The `tables` catalog has `UNIQUE(workspace_id, table_name)`, so the subquery returns exactly one row. PG folds it efficiently. Authors write `table("Tasks")`; readers of generated SQL see `table_name = 'Tasks'`. UUIDs stay internal.
@@ -121,8 +119,8 @@ Compiles to:
 ```sql
 SELECT COUNT(*) AS measure
 FROM rows
-WHERE table_id = (SELECT table_id FROM tables
-                  WHERE table_name = 'Tasks' AND workspace_id = $1);
+WHERE table_id = 42        -- inlined from the schema dict
+  AND workspace_id = $1;
 ```
 
 Returns:
@@ -153,8 +151,8 @@ Compiles to:
 ```sql
 SELECT COUNT(*) AS measure
 FROM rows
-WHERE table_id = (SELECT table_id FROM tables
-                  WHERE table_name = 'Tasks' AND workspace_id = $1)
+WHERE table_id = 42        -- inlined from the schema dict
+  AND workspace_id = $1
   AND row_data @> '{"<status>": "todo"}'::jsonb;
 ```
 
@@ -183,8 +181,8 @@ Compiles to:
 SELECT row_data->>'<priority>' AS dim_0,
        COUNT(*)                AS measure
 FROM rows
-WHERE table_id = (SELECT table_id FROM tables
-                  WHERE table_name = 'Tasks' AND workspace_id = $1)
+WHERE table_id = 42        -- inlined from the schema dict
+  AND workspace_id = $1
   AND NOT (row_data @> '{"<status>":"merged"}'::jsonb)
 GROUP BY dim_0
 ORDER BY measure DESC;
@@ -242,8 +240,8 @@ SELECT row_data->>'<priority>'                                            AS dim
        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY (...)::numeric)       AS median,
        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY (...)::numeric)       AS p95
 FROM rows
-WHERE table_id = (SELECT table_id FROM tables
-                  WHERE table_name = 'Tasks' AND workspace_id = $1)
+WHERE table_id = 42        -- inlined from the schema dict
+  AND workspace_id = $1
   AND row_data @> '{"<type>":"task"}'::jsonb
 GROUP BY dim_0;
 ```
