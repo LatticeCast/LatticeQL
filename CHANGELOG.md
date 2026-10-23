@@ -4,6 +4,17 @@ All notable changes to LatticeQL (Python) are documented here.
 
 ---
 
+### v0.5 — 2026-10-23 — rows are addressed by the table identity alone
+
+- Breaking: emitted SQL no longer carries `AND workspace_id = $1`. Rows have no
+  workspace of their own; the table identity addresses them and the caller's
+  workspace authorises it through row-level security.
+- Parameters therefore start at `$1` instead of `$2`; the CLI no longer has an
+  implicit first placeholder to fill.
+- `_site/examples` goldens updated to the workspace-free predicates.
+
+---
+
 ### v0.4 — 2026-10-23 — tables are addressed by name and identified by a number
 
 - Breaking: `schema["<table_name>"]["table_id"]` is the table's BIGINT identity, not a

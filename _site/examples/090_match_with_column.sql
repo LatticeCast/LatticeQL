@@ -5,5 +5,5 @@ SELECT row_data->>'col-assignee'  AS dim_0,
   ELSE 0
 END)::numeric) AS avg_urgency
 FROM rows
-WHERE table_id = 101 AND workspace_id = $1
+WHERE table_id = 101
 GROUP BY dim_0;

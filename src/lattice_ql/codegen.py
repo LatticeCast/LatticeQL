@@ -109,9 +109,7 @@ class Codegen:
         # carries the numeric identity, which rows are keyed by. int() keeps
         # the literal numeric so the BIGINT index is used and nothing from the
         # schema can be injected into the SQL.
-        parts.append(
-            f"FROM rows\nWHERE table_id = {int(table_meta.table_id)} AND workspace_id = $1"
-        )
+        parts.append(f"FROM rows\nWHERE table_id = {int(table_meta.table_id)}")
 
         # pre-aggregate filters → WHERE AND clauses
         for f in pre_filters:
@@ -221,7 +219,7 @@ class Codegen:
         if isinstance(expr, ParamExpr):
             if expr.name not in self._param_names:
                 self._param_names.append(expr.name)
-            idx = self._param_names.index(expr.name) + 2  # $1 is workspace_id
+            idx = self._param_names.index(expr.name) + 1
             return f"${idx}"
         if isinstance(expr, Literal):
             v = expr.value

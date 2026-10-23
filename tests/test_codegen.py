@@ -72,14 +72,16 @@ def test_count_all():
     expected = (
         "SELECT COUNT(*) AS measure\n"
         "FROM rows\n"
-        "WHERE table_id = 101 AND workspace_id = $1;"
+        "WHERE table_id = 101;"
     )
     assert _cg(q) == expected
 
 
-def test_workspace_id_always_dollar_one():
+def test_no_workspace_predicate():
+    # Rows carry no workspace: table_id is the authority, and the workspace
+    # scope comes from the schema the compiler was handed.
     q = _q(TableStage("Tasks"), AggregateStage(measures=AggExpr("count", [])))
-    assert "workspace_id = $1" in _cg(q)
+    assert "workspace_id" not in _cg(q)
 
 
 def test_table_id_from_schema_in_from_clause():
@@ -142,7 +144,7 @@ def test_filter_param_eq():
         FilterStage(_lam(BinOp("==", _fa("col-sprint"), ParamExpr("sprint")))),
         AggregateStage(measures=AggExpr("count", [])),
     )
-    assert "(row_data->>'col-sprint' ) = ($2)" in _cg(q)
+    assert "(row_data->>'col-sprint' ) = ($1)" in _cg(q)
 
 
 def test_filter_and():
@@ -540,14 +542,14 @@ def test_match_wildcard_else():
 # ---------------------------------------------------------------------------
 
 
-def test_first_named_param_is_dollar_two():
+def test_first_named_param_is_dollar_one():
     q = _q(
         TableStage("Tasks"),
         FilterStage(_lam(BinOp("==", _fa("col-sprint"), ParamExpr("sprint")))),
         AggregateStage(measures=AggExpr("count", [])),
     )
     sql = _cg(q)
-    assert "$2" in sql
+    assert "$1" in sql
 
 
 def test_two_distinct_params_numbered_sequentially():
@@ -565,8 +567,8 @@ def test_two_distinct_params_numbered_sequentially():
         AggregateStage(measures=AggExpr("count", [])),
     )
     sql = _cg(q)
+    assert "$1" in sql
     assert "$2" in sql
-    assert "$3" in sql
 
 
 def test_same_param_reuses_placeholder():
@@ -584,8 +586,8 @@ def test_same_param_reuses_placeholder():
         AggregateStage(measures=AggExpr("count", [])),
     )
     sql = _cg(q)
-    assert sql.count("$2") == 2
-    assert "$3" not in sql
+    assert sql.count("$1") == 2
+    assert "$2" not in sql
 
 
 # ---------------------------------------------------------------------------

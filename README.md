@@ -44,7 +44,7 @@ echo 'table("Tasks") | aggregate(count())' | lqlc --schema-json '{"Tasks": {...}
 ```
 
 The compiler pipeline is: **lexer → parser → resolver → sema → codegen**.
-`$1` is always `workspace_id`; additional `$param` values follow in order of first appearance.
+`table_id` is inlined from the schema, so `$1` is the first `$param` in source order.
 
 See `CHANGELOG.md` for what is implemented in v0.1 and what is deferred.
 
@@ -75,10 +75,9 @@ Compiles to:
 ```sql
 FROM rows
 WHERE table_id = 42   -- inlined from schema["Tasks"]["table_id"]
-  AND workspace_id = $workspace_id
 ```
 
-The `tables` catalog has `UNIQUE(workspace_id, table_name)`, so the subquery returns exactly one row. PG folds it efficiently. Authors write `table("Tasks")`; readers of generated SQL see `table_name = 'Tasks'`. UUIDs stay internal.
+Rows carry no workspace of their own: the table identity is the whole address, and `UNIQUE(workspace_id, table_name)` keeps table names unique inside a workspace. Authors write `table("Tasks")`; readers of generated SQL see `table_id = 42`. UUIDs stay internal.
 
 ### 1.2 Column references — by name in source, by id in row_data
 
@@ -88,7 +87,7 @@ For doc readability, examples below write `row_data->>'<status>'` to mean "the J
 
 ### 1.3 Workspace context
 
-Every LatticeQL query runs inside a workspace. The compiler injects `workspace_id = $1` wherever it resolves a table_name. Cross-workspace queries are rejected at compile time.
+Every LatticeQL query runs inside a workspace, because the schema it compiles against is the workspace's. A table resolves to its numeric `table_id`, which is what the emitted SQL filters on; row-level security then authorises that id for the calling user. A name outside the schema is rejected at compile time, so a query can never address another workspace's table.
 
 ### 1.4 Time is UTC — always
 
@@ -119,8 +118,7 @@ Compiles to:
 ```sql
 SELECT COUNT(*) AS measure
 FROM rows
-WHERE table_id = 42        -- inlined from the schema dict
-  AND workspace_id = $1;
+WHERE table_id = 42;       -- inlined from the schema dict
 ```
 
 Returns:
@@ -152,7 +150,6 @@ Compiles to:
 SELECT COUNT(*) AS measure
 FROM rows
 WHERE table_id = 42        -- inlined from the schema dict
-  AND workspace_id = $1
   AND row_data @> '{"<status>": "todo"}'::jsonb;
 ```
 
@@ -182,7 +179,6 @@ SELECT row_data->>'<priority>' AS dim_0,
        COUNT(*)                AS measure
 FROM rows
 WHERE table_id = 42        -- inlined from the schema dict
-  AND workspace_id = $1
   AND NOT (row_data @> '{"<status>":"merged"}'::jsonb)
 GROUP BY dim_0
 ORDER BY measure DESC;
@@ -241,7 +237,6 @@ SELECT row_data->>'<priority>'                                            AS dim
        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY (...)::numeric)       AS p95
 FROM rows
 WHERE table_id = 42        -- inlined from the schema dict
-  AND workspace_id = $1
   AND row_data @> '{"<type>":"task"}'::jsonb
 GROUP BY dim_0;
 ```
@@ -1033,7 +1028,7 @@ The compiler:
 
 1. Validates each `$name` against declared type.
 2. Substitutes `$bucket_unit` (a literal control parameter) inline.
-3. Binds `$start_date` / `$end_date` / `$user` as **prepared-statement parameters** ($2, $3, $4 after the implicit `$1 = workspace_id`) — never string-interpolated. Date relative expressions (`"now-30d"`) resolve to absolute UTC instants at render time, before binding.
+3. Binds `$start_date` / `$end_date` / `$user` as **prepared-statement parameters** ($1, $2, $3 in source order) — never string-interpolated. Date relative expressions (`"now-30d"`) resolve to absolute UTC instants at render time, before binding.
 
 Result: same compiled SQL, different bound values per render — PG plan cache hits.
 
@@ -1107,7 +1102,7 @@ Compiler also blocks:
 
 | LatticeQL | SQL |
 |---|---|
-| `table("X")` | `FROM rows WHERE table_id = (... 'X' ... workspace_id=$1)` |
+| `table("X")` | `FROM rows WHERE table_id = 42` (numeric id from the schema) |
 | `\| filter(...)` (before agg) | `WHERE ...` |
 | `\| with_column("c", lambda)` | inline `CASE WHEN ...` or computed expr |
 | `\| group_by((r) -> { r.x })` | `GROUP BY row_data->>'<x>' AS dim_N` |
@@ -1359,7 +1354,7 @@ lattice-ql panel.lql --schema schema.json -o panel.sql --emit-params
 | Flag | Meaning |
 |---|---|
 | `--schema <FILE>` | JSON column-metadata for the workspace |
-| `--workspace <UUID>` | Inject as `$1`; otherwise stays a placeholder |
+| `--workspace <UUID>` | Record the workspace for schema lookups; no placeholder is bound |
 | `-o <FILE>` | Write SQL to file (else stdout) |
 | `--emit-params` | Also write `<output>.sql.params.json` |
 | `--explain` | Print AST + IR to stderr before SQL |
