@@ -1,7 +1,7 @@
 SELECT row_data->>'col-priority'  AS dim_0,
        COUNT(*) AS measure
 FROM (
-  SELECT row_id, row_data
+  SELECT row_id, row_data, created_at, updated_at
   FROM rows
   WHERE table_id = (
     SELECT table_id FROM tables

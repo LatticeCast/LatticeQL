@@ -144,10 +144,12 @@ class Codegen:
 
         # Physical rows are never exposed as ``SELECT *``. The table name is in
         # the query text already, so it is inlined as a literal; the only value
-        # the host still supplies is the workspace the caller may read.
+        # the host still supplies is the workspace the caller may read. The
+        # subquery keeps the row timestamps so a row-list can sort by them; the
+        # outer projection still exposes only row_id and row_data.
         parts.append(
             "FROM (\n"
-            "  SELECT row_id, row_data\n"
+            "  SELECT row_id, row_data, created_at, updated_at\n"
             "  FROM rows\n"
             "  WHERE table_id = (\n"
             "    SELECT table_id FROM tables\n"

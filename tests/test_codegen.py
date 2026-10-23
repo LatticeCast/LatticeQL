@@ -67,7 +67,7 @@ def test_count_all():
     expected = (
         "SELECT COUNT(*) AS measure\n"
         "FROM (\n"
-        "  SELECT row_id, row_data\n"
+        "  SELECT row_id, row_data, created_at, updated_at\n"
         "  FROM rows\n"
         "  WHERE table_id = (\n"
         "    SELECT table_id FROM tables\n"
@@ -498,6 +498,19 @@ def test_sort_desc_by_alias():
         SortStage(keys=[SortKey(expr=Literal("tickets"), desc=True)]),
     )
     assert "ORDER BY tickets DESC" in _cg(q)
+
+
+def test_row_list_can_sort_by_a_row_timestamp():
+    """A row-list sorts inside the source subquery, so it must expose the field."""
+    q = _q(
+        TableStage("Tasks"),
+        SortStage(keys=[SortKey(expr=Literal("updated_at"), desc=True)]),
+        LimitStage(n=20),
+    )
+    sql = _cg(q)
+    assert "SELECT row_id, row_data, created_at, updated_at" in sql
+    assert "ORDER BY updated_at DESC" in sql
+    assert sql.startswith("SELECT row_id,\n       row_data\n")
 
 
 def test_sort_multiple_keys():

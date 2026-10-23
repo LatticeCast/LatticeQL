@@ -3,7 +3,7 @@ SELECT row_data->>'col-priority'  AS dim_0,
        AVG((row_data->>'col-estimate')::numeric) AS avg_pts,
        SUM((row_data->>'col-estimate')::numeric) AS total_pts
 FROM (
-  SELECT row_id, row_data
+  SELECT row_id, row_data, created_at, updated_at
   FROM rows
   WHERE table_id = (
     SELECT table_id FROM tables

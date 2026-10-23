@@ -1,7 +1,7 @@
 SELECT date_trunc('month', to_timestamp((row_data->>'col-created-at')::double precision / 1000.0) AT TIME ZONE 'UTC') AS dim_0,
        COUNT(*) AS measure
 FROM (
-  SELECT row_id, row_data
+  SELECT row_id, row_data, created_at, updated_at
   FROM rows
   WHERE table_id = (
     SELECT table_id FROM tables

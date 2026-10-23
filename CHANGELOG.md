@@ -4,6 +4,13 @@ All notable changes to LatticeQL (Python) are documented here.
 
 ---
 
+### v0.6.1 — 2026-10-24 — row lists can sort by a row timestamp
+
+- The source subquery now selects `created_at` and `updated_at` alongside
+  `row_id` and `row_data`, so `sort_desc("updated_at")` resolves instead of
+  failing with `column "updated_at" does not exist`. The outer projection still
+  exposes only `row_id` and `row_data`.
+
 ### v0.6 — 2026-10-24 — workspace-scoped table-name resolution
 
 - Breaking: schema no longer accepts `table_id`; it contains table names and

@@ -4,7 +4,7 @@ SELECT AVG(CASE row_data->>'col-status'
   ELSE 0
 END) FILTER (WHERE row_data->>'col-status'  IN ('done', 'merged')) AS rate
 FROM (
-  SELECT row_id, row_data
+  SELECT row_id, row_data, created_at, updated_at
   FROM rows
   WHERE table_id = (
     SELECT table_id FROM tables

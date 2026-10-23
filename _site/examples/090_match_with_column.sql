@@ -5,7 +5,7 @@ SELECT row_data->>'col-assignee'  AS dim_0,
   ELSE 0
 END)::numeric) AS avg_urgency
 FROM (
-  SELECT row_id, row_data
+  SELECT row_id, row_data, created_at, updated_at
   FROM rows
   WHERE table_id = (
     SELECT table_id FROM tables
