@@ -33,15 +33,10 @@ from lattice_ql.codegen import Codegen
 from lattice_ql.error import CodegenError
 from lattice_ql.schema import Schema
 
-
-# Codegen needs the schema to know a table's id: it emits that id directly
-# instead of resolving the name through a `tables.table_name` column, which
-# neither this compiler's schema format nor LatticeCast's database has. The
-# ids match _site/examples/_schema.json so the goldens and these tests agree.
 _SCHEMA = Schema.from_dict(
     {
-        "Tasks": {"table_id": 101, "columns": {}},
-        "Deals": {"table_id": 102, "columns": {}},
+        "Tasks": {"columns": {}},
+        "Deals": {"columns": {}},
     }
 )
 
@@ -71,26 +66,39 @@ def test_count_all():
     q = _q(TableStage("Tasks"), AggregateStage(measures=AggExpr("count", [])))
     expected = (
         "SELECT COUNT(*) AS measure\n"
-        "FROM rows\n"
-        "WHERE table_id = 101;"
+        "FROM (\n"
+        "  SELECT row_id, row_data\n"
+        "  FROM rows\n"
+        "  WHERE table_id = (\n"
+        "    SELECT table_id FROM tables\n"
+        "    WHERE workspace_id = CAST(:workspace_id AS uuid)\n"
+        "      AND table_name = 'Tasks'\n"
+        "  )\n"
+        ") AS source_rows;"
     )
     assert _cg(q) == expected
 
 
-def test_no_workspace_predicate():
-    # Rows carry no workspace: table_id is the authority, and the workspace
-    # scope comes from the schema the compiler was handed.
+def test_workspace_scoped_table_lookup():
     q = _q(TableStage("Tasks"), AggregateStage(measures=AggExpr("count", [])))
-    assert "workspace_id" not in _cg(q)
+    assert "workspace_id = CAST(:workspace_id AS uuid)" in _cg(q)
 
 
-def test_table_id_from_schema_in_from_clause():
-    # The FROM clause carries the schema's table_id, not the name it was
-    # addressed by. These differ here on purpose: 'Deals' -> 102.
+def test_codegen_inlines_the_table_name_from_the_query():
     q = _q(TableStage("Deals"), AggregateStage(measures=AggExpr("count", [])))
     sql = _cg(q)
-    assert "table_id = 102" in sql
-    assert "table_name" not in sql
+    assert "table_id = (" in sql
+    assert "table_name = 'Deals'" in sql
+    assert ":table_name" not in sql
+
+
+def test_compile_binds_only_the_workspace_placeholder():
+    from lattice_ql import compile
+
+    compiled = compile('table("Deals") | aggregate(count())', _SCHEMA)
+    assert compiled.params == {}
+    assert ":workspace_id" in compiled.sql
+    assert "table_name = 'Deals'" in compiled.sql
 
 
 def test_unknown_table_is_a_codegen_error():
@@ -428,7 +436,31 @@ def test_having_stage():
         HavingStage(_lam(BinOp(">", _fa("measure"), Literal(5)))),
     )
     sql = _cg(q)
-    assert "HAVING (measure) > (5)" in sql
+    # PostgreSQL resolves neither SELECT aliases nor aggregate names in HAVING.
+    assert "HAVING (COUNT(*)) > (5)" in sql
+    assert "HAVING (measure)" not in sql
+
+
+def test_having_rejects_row_level_containment_on_a_dimension():
+    q = _q(
+        TableStage("Tasks"),
+        GroupByStage(dims=[_lam(_fa("col-priority"))]),
+        AggregateStage(measures=AggExpr("count", [])),
+        HavingStage(_lam(GinContainment(pairs=[("col-priority", "high")]))),
+    )
+    with pytest.raises(CodegenError, match="HAVING cannot match a dimension with GIN containment"):
+        _cg(q)
+
+
+def test_having_rejects_an_alias_that_is_not_a_result():
+    q = _q(
+        TableStage("Tasks"),
+        GroupByStage(dims=[_lam(_fa("col-priority"))]),
+        AggregateStage(measures=AggExpr("count", [])),
+        HavingStage(_lam(BinOp(">", _fa("nope"), Literal(5)))),
+    )
+    with pytest.raises(CodegenError, match="neither a group-by dimension nor an aggregate result"):
+        _cg(q)
 
 
 def test_post_aggregate_filter_becomes_having():
@@ -619,13 +651,15 @@ def test_clause_order_select_from_where_group_having_order_limit():
 # ---------------------------------------------------------------------------
 
 
-def test_no_aggregate_no_group_selects_star():
-    # Row-list query: no aggregate stage → SELECT *
+def test_no_aggregate_no_group_returns_only_row_id_and_data():
+    # Row-list queries must not expose rows metadata.
     q = _q(
         TableStage("Tasks"),
         FilterStage(_lam(GinContainment([("col-status", "todo")]))),
     )
-    assert "SELECT *" in _cg(q)
+    sql = _cg(q)
+    assert "SELECT row_id,\n       row_data" in sql
+    assert "SELECT *" not in sql
 
 
 def test_unknown_stage_raises():

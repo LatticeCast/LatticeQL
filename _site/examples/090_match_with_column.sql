@@ -4,6 +4,13 @@ SELECT row_data->>'col-assignee'  AS dim_0,
   WHEN 'high' THEN 50
   ELSE 0
 END)::numeric) AS avg_urgency
-FROM rows
-WHERE table_id = 101
+FROM (
+  SELECT row_id, row_data
+  FROM rows
+  WHERE table_id = (
+    SELECT table_id FROM tables
+    WHERE workspace_id = CAST(:workspace_id AS uuid)
+      AND table_name = 'Tasks'
+  )
+) AS source_rows
 GROUP BY dim_0;

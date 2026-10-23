@@ -100,10 +100,9 @@ def test_main_output_contains_sql(tmp_path: Path, capsys: pytest.CaptureFixture)
     assert rc == 0
     captured = capsys.readouterr()
     assert "COUNT(*)" in captured.out
-    # The FROM clause carries the schema's table_id, not the name the
-    # query addressed it by, so assert the id.
-    assert "101" in captured.out
-    assert "Tasks" not in captured.out
+    assert ":workspace_id" in captured.out
+    assert ":table_name" not in captured.out
+    assert "table_name = 'Tasks'" in captured.out
     assert captured.out.strip().endswith(";")
 
 
@@ -139,10 +138,9 @@ def test_subprocess_file_and_schema_file(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert "COUNT(*)" in result.stdout
-    # The FROM clause carries the schema's table_id, not the name the
-    # query addressed it by, so assert the id.
-    assert "101" in result.stdout
-    assert "Tasks" not in result.stdout
+    assert ":workspace_id" in result.stdout
+    assert ":table_name" not in result.stdout
+    assert "table_name = 'Tasks'" in result.stdout
 
 
 def test_subprocess_stdin_and_schema_json() -> None:

@@ -29,7 +29,6 @@ from lattice_ql.sema import Sema
 
 SCHEMA_DICT = {
     "Tasks": {
-        "table_id": 101,
         "columns": {
             "status": {"id": "col-status", "type": "select"},
             "priority": {"id": "col-priority", "type": "select"},
@@ -372,7 +371,6 @@ def test_bucket_on_datetime_column_ok() -> None:
     schema = Schema.from_dict(
         {
             "Events": {
-                "table_id": 103,
                 "columns": {"started_at": {"id": "col-started-at", "type": "datetime"}},
             }
         }

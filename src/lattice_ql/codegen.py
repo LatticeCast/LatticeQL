@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .ast import (
     AggExpr,
     AggregateStage,
@@ -28,13 +30,41 @@ from .error import CodegenError
 from .schema import Schema
 
 
+@dataclass(frozen=True)
+class CompiledQuery:
+    """SQL and the bindings the compiler itself supplies.
+
+    The table name is inlined into the SQL, so the compiler binds nothing
+    today; ``params`` is the seam for ``$param`` support. The host always
+    supplies ``:workspace_id``.
+    """
+
+    sql: str
+    params: dict[str, str]
+
+
+def _sql_literal(value: str) -> str:
+    """A single-quoted SQL literal, with quotes doubled.
+
+    Table names may not contain a dot (V67) but nothing stops a quote, and this
+    is the only user text that reaches SQL as a literal rather than a JSONB
+    value or a parameter.
+    """
+    return "'" + value.replace("'", "''") + "'"
+
+
 class Codegen:
     def __init__(self, schema: Schema) -> None:
         self._schema = schema
         self._virtual_cols: dict[str, object] = {}
         self._param_names: list[str] = []
+        # Output alias -> the SQL it stands for. HAVING cannot name a SELECT
+        # alias in PostgreSQL, so an LQL `g.measure` / `g.dim_0` reference is
+        # rewritten to the expression behind it.
+        self._alias_sql: dict[str, str] = {}
 
     def generate(self, query: Query) -> str:
+        self._alias_sql = {}
         table_stage: TableStage = query.stages[0]  # type: ignore[assignment]
         rest = query.stages[1:]
 
@@ -85,14 +115,22 @@ class Codegen:
             for alias, sql, is_field in self._dim_exprs(group_by):
                 spaces = "  " if is_field else " "
                 select_parts.append(f"{sql}{spaces}AS {alias}")
+                self._alias_sql[alias] = sql
         if aggregate is not None:
             if isinstance(aggregate.measures, dict):
                 for name, agg in aggregate.measures.items():
-                    select_parts.append(f"{self._agg_sql(agg)} AS {name}")
+                    agg_sql = self._agg_sql(agg)
+                    select_parts.append(f"{agg_sql} AS {name}")
+                    self._alias_sql[name] = agg_sql
             else:
-                select_parts.append(f"{self._agg_sql(aggregate.measures)} AS measure")
+                agg_sql = self._agg_sql(aggregate.measures)
+                select_parts.append(f"{agg_sql} AS measure")
+                self._alias_sql["measure"] = agg_sql
         elif not select_parts:
-            select_parts.append("*")
+            # A row-list query exposes only the table-scoped row identity and
+            # its JSONB cells. Table identity, timestamps, and ownership stay
+            # internal metadata.
+            select_parts.extend(["row_id", "row_data"])
 
         indent = " " * 7  # len("SELECT ")
         if len(select_parts) == 1:
@@ -104,16 +142,25 @@ class Codegen:
             lines.append(f"{indent}{select_parts[-1]}")
             parts.append("\n".join(lines))
 
-        # FROM + base WHERE
-        # A query names its table; the schema dict is keyed by that name and
-        # carries the numeric identity, which rows are keyed by. int() keeps
-        # the literal numeric so the BIGINT index is used and nothing from the
-        # schema can be injected into the SQL.
-        parts.append(f"FROM rows\nWHERE table_id = {int(table_meta.table_id)}")
+        # Physical rows are never exposed as ``SELECT *``. The table name is in
+        # the query text already, so it is inlined as a literal; the only value
+        # the host still supplies is the workspace the caller may read.
+        parts.append(
+            "FROM (\n"
+            "  SELECT row_id, row_data\n"
+            "  FROM rows\n"
+            "  WHERE table_id = (\n"
+            "    SELECT table_id FROM tables\n"
+            "    WHERE workspace_id = CAST(:workspace_id AS uuid)\n"
+            f"      AND table_name = {_sql_literal(table_name)}\n"
+            "  )\n"
+            ") AS source_rows"
+        )
 
         # pre-aggregate filters → WHERE AND clauses
-        for f in pre_filters:
-            parts.append(f"  AND {self._filter_cond(f.lambda_)}")
+        for index, f in enumerate(pre_filters):
+            keyword = "WHERE" if index == 0 else "  AND"
+            parts.append(f"{keyword} {self._filter_cond(f.lambda_)}")
 
         # GROUP BY
         if group_by is not None:
@@ -158,14 +205,34 @@ class Codegen:
         return self._having_expr_sql(lam.body)
 
     def _having_expr_sql(self, expr: object) -> str:
-        """Expression SQL in HAVING context: FieldAccess refers to aggregate alias."""
+        """Expression SQL in HAVING context: FieldAccess names an output alias.
+
+        PostgreSQL resolves neither SELECT aliases nor aggregate names in
+        HAVING, so the alias is replaced by the expression it stands for
+        (``measure`` -> ``COUNT(*)``, ``dim_0`` -> its grouping expression).
+        """
         if isinstance(expr, BinOp):
             op = self._sql_op(expr.op)
             left = f"({self._having_expr_sql(expr.left)})"
             right = f"({self._having_expr_sql(expr.right)})"
             return f"{left} {op} {right}"
         if isinstance(expr, FieldAccess):
-            return expr.field  # aggregate alias name
+            resolved = self._alias_sql.get(expr.field)
+            if resolved is None:
+                raise CodegenError(
+                    f"HAVING references {expr.field!r}, which is neither a "
+                    f"group-by dimension nor an aggregate result "
+                    f"(available: {sorted(self._alias_sql)})"
+                )
+            return resolved
+        if isinstance(expr, GinContainment):
+            # String equality on a select column compiles to `row_data @> ...`,
+            # which is a row-level predicate: valid inside the subquery, never
+            # in HAVING.
+            raise CodegenError(
+                "HAVING cannot match a dimension with GIN containment; "
+                "filter before aggregate, or compare an aggregate (g.measure)"
+            )
         return self._expr_sql(expr)
 
     # ------------------------------------------------------------------

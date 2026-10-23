@@ -36,7 +36,7 @@ def test_golden(lql_path: Path) -> None:
     sql_path = lql_path.with_suffix(".sql")
     schema = _schema()
 
-    actual = lattice_ql.compile(lql, schema)
+    actual = lattice_ql.compile(lql, schema).sql
 
     if os.environ.get("LQLC_REGEN"):
         sql_path.write_text(actual)

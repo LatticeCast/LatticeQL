@@ -53,10 +53,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from . import compile as lql_compile
 
-        sql = lql_compile(lql, schema)
+        compiled = lql_compile(lql, schema)
     except LatticeQLError as exc:
         print(f"lqlc: {exc}", file=sys.stderr)
         return 1
 
-    print(sql)
+    print(compiled.sql)
     return 0

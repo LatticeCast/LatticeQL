@@ -1,6 +1,5 @@
 {
   "Tasks": {
-    "table_id": 101,
     "columns": {
       "status": {
         "id": "col-status",
@@ -33,7 +32,6 @@
     }
   },
   "Deals": {
-    "table_id": 102,
     "columns": {
       "status": {
         "id": "col-deal-status",

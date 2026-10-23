@@ -1,6 +1,13 @@
 SELECT row_data->>'col-priority'  AS dim_0,
        COUNT(*) AS measure
-FROM rows
-WHERE table_id = 101
+FROM (
+  SELECT row_id, row_data
+  FROM rows
+  WHERE table_id = (
+    SELECT table_id FROM tables
+    WHERE workspace_id = CAST(:workspace_id AS uuid)
+      AND table_name = 'Tasks'
+  )
+) AS source_rows
 GROUP BY dim_0
-HAVING (measure) > (5);
+HAVING (COUNT(*)) > (5);

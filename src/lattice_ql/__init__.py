@@ -4,17 +4,17 @@ from pathlib import Path
 from typing import Union
 
 from .ast import Query, VarRefStage
-from .codegen import Codegen
+from .codegen import Codegen, CompiledQuery
 from .error import ParseError
 from .parser import parse_program
 from .resolver import Resolver
 from .schema import Schema, load_schema
 from .sema import Sema
 
-__all__ = ["compile", "Schema", "load_schema"]
+__all__ = ["compile", "CompiledQuery", "Schema", "load_schema"]
 
 
-def compile(lql: str, schema: Union[dict, str, Path, Schema]) -> str:
+def compile(lql: str, schema: Union[dict, str, Path, Schema]) -> CompiledQuery:
     """Compile a LatticeQL query string to PostgreSQL SQL.
 
     Args:
@@ -22,7 +22,9 @@ def compile(lql: str, schema: Union[dict, str, Path, Schema]) -> str:
         schema: Schema as a dict, JSON string, or Schema object.
 
     Returns:
-        A PostgreSQL SQL string.
+        The SQL plus the bindings the compiler supplies (none today: the table
+        name is inlined). The host supplies the required ``:workspace_id``
+        execution placeholder.
     """
     if not isinstance(schema, Schema):
         schema = load_schema(schema)
@@ -31,7 +33,7 @@ def compile(lql: str, schema: Union[dict, str, Path, Schema]) -> str:
     query = _expand_bindings(prog.query, bindings)
     resolved = Resolver(schema).resolve(query)
     checked = Sema(schema).transform(resolved)
-    return Codegen(schema).generate(checked)
+    return CompiledQuery(sql=Codegen(schema).generate(checked), params={})
 
 
 def _expand_bindings(query: Query, bindings: dict) -> Query:

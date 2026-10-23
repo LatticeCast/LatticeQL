@@ -21,7 +21,6 @@ from lattice_ql import compile
 
 schema = {
     "Tasks": {
-        "table_id": 42,
         "columns": {
             "status":   {"id": "col-status",   "type": "select"},
             "priority": {"id": "col-priority", "type": "select"}
@@ -29,8 +28,8 @@ schema = {
     }
 }
 
-sql = compile('table("Tasks") | aggregate(count())', schema)
-print(sql)
+compiled = compile('table("Tasks") | aggregate(count())', schema)
+print(compiled.sql)
 ```
 
 **CLI (`lqlc`):**
@@ -44,7 +43,8 @@ echo 'table("Tasks") | aggregate(count())' | lqlc --schema-json '{"Tasks": {...}
 ```
 
 The compiler pipeline is: **lexer → parser → resolver → sema → codegen**.
-`table_id` is inlined from the schema, so `$1` is the first `$param` in source order.
+Its SQL requires a backend-provided `:workspace_id` and returns the
+table-name bind needed to resolve the numeric row key.
 
 See `CHANGELOG.md` for what is implemented in v0.1 and what is deferred.
 
@@ -64,7 +64,10 @@ Further, by just add dashboard view, it become CRM system. However, the layout i
 
 ### 1.1 Table addressing — by name, never by UUID
 
-LatticeCast stores all rows in a single `rows` table, where `table_id` is the table's BIGINT identity. **LatticeQL never exposes that number**: queries name tables, and the compiler inlines the id from the schema dict it was handed.
+LatticeCast stores all rows in a single `rows` table, where `table_id` is the
+BIGINT identity. LatticeQL schema and source use only table names. The backend
+injects the authorised workspace into the compiled query, which resolves the
+name through `UNIQUE(workspace_id, table_name)` before querying rows.
 
 ```latticeql
 table("Tasks")
@@ -73,11 +76,22 @@ table("Tasks")
 Compiles to:
 
 ```sql
-FROM rows
-WHERE table_id = 42   -- inlined from schema["Tasks"]["table_id"]
+FROM (
+  SELECT row_id, row_data
+  FROM rows
+  WHERE table_id = (
+    SELECT table_id FROM tables
+    WHERE workspace_id = CAST(:workspace_id AS uuid)
+      AND table_name = 'Tasks'
+  )
+) AS source_rows
 ```
 
-Rows carry no workspace of their own: the table identity is the whole address, and `UNIQUE(workspace_id, table_name)` keeps table names unique inside a workspace. Authors write `table("Tasks")`; readers of generated SQL see `table_id = 42`. UUIDs stay internal.
+Rows carry no workspace of their own. Authors write `table("Tasks")`; the
+compiler inlines that name as a literal and emits the workspace-scoped lookup,
+so the database uses its numeric result for `rows.table_id`. Only
+`:workspace_id` is supplied by the host at execution time: the table a query
+reads is fixed by its own text and cannot be retargeted by the caller.
 
 ### 1.2 Column references — by name in source, by id in row_data
 
@@ -87,7 +101,20 @@ For doc readability, examples below write `row_data->>'<status>'` to mean "the J
 
 ### 1.3 Workspace context
 
-Every LatticeQL query runs inside a workspace, because the schema it compiles against is the workspace's. A table resolves to its numeric `table_id`, which is what the emitted SQL filters on; row-level security then authorises that id for the calling user. A name outside the schema is rejected at compile time, so a query can never address another workspace's table.
+Every LatticeQL query runs in a backend-provided workspace. A table name must
+exist in the schema, then the generated lookup resolves its numeric ID only in
+that workspace; RLS authorises the resulting table access.
+
+The compiled SQL carries exactly one execution parameter, `:workspace_id`. A
+table name is never a parameter: it comes from the query text and is inlined as
+a literal, so a host cannot point a compiled query at a table its author did not
+name.
+
+Free `$param` references are the other kind of host input: the compiler numbers
+them `$1`, `$2`, ... in first-use order and the caller binds them positionally.
+LatticeCast's backend does not bind positional parameters yet, so such a query
+is rejected with a 400 instead of reaching PostgreSQL with placeholders nobody
+filled (`src/config/lattice_ql.py`).
 
 ### 1.4 Time is UTC — always
 
@@ -117,8 +144,15 @@ Compiles to:
 
 ```sql
 SELECT COUNT(*) AS measure
-FROM rows
-WHERE table_id = 42;       -- inlined from the schema dict
+FROM (
+  SELECT row_id, row_data
+  FROM rows
+  WHERE table_id = (
+    SELECT table_id FROM tables
+    WHERE workspace_id = CAST(:workspace_id AS uuid)
+      AND table_name = 'Tasks'
+  )
+) AS source_rows;
 ```
 
 Returns:
@@ -148,9 +182,16 @@ Compiles to:
 
 ```sql
 SELECT COUNT(*) AS measure
-FROM rows
-WHERE table_id = 42        -- inlined from the schema dict
-  AND row_data @> '{"<status>": "todo"}'::jsonb;
+FROM (
+  SELECT row_id, row_data
+  FROM rows
+  WHERE table_id = (
+    SELECT table_id FROM tables
+    WHERE workspace_id = CAST(:workspace_id AS uuid)
+      AND table_name = 'Tasks'
+  )
+) AS source_rows
+WHERE row_data @> '{"<status>": "todo"}'::jsonb;
 ```
 
 Three ideas:
@@ -177,9 +218,16 @@ Compiles to:
 ```sql
 SELECT row_data->>'<priority>' AS dim_0,
        COUNT(*)                AS measure
-FROM rows
-WHERE table_id = 42        -- inlined from the schema dict
-  AND NOT (row_data @> '{"<status>":"merged"}'::jsonb)
+FROM (
+  SELECT row_id, row_data
+  FROM rows
+  WHERE table_id = (
+    SELECT table_id FROM tables
+    WHERE workspace_id = CAST(:workspace_id AS uuid)
+      AND table_name = 'Tasks'
+  )
+) AS source_rows
+WHERE NOT (row_data @> '{"<status>":"merged"}'::jsonb)
 GROUP BY dim_0
 ORDER BY measure DESC;
 ```
@@ -235,9 +283,16 @@ SELECT row_data->>'<priority>'                                            AS dim
        SUM((row_data->>'<estimate>')::numeric)                            AS total_pts,
        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY (...)::numeric)       AS median,
        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY (...)::numeric)       AS p95
-FROM rows
-WHERE table_id = 42        -- inlined from the schema dict
-  AND row_data @> '{"<type>":"task"}'::jsonb
+FROM (
+  SELECT row_id, row_data
+  FROM rows
+  WHERE table_id = (
+    SELECT table_id FROM tables
+    WHERE workspace_id = CAST(:workspace_id AS uuid)
+      AND table_name = 'Tasks'
+  )
+) AS source_rows
+WHERE row_data @> '{"<type>":"task"}'::jsonb
 GROUP BY dim_0;
 ```
 
@@ -342,7 +397,7 @@ ORDER BY (row_data->>'<created_at>')::timestamptz ASC
 LIMIT 20 OFFSET 40
 ```
 
-For deep pagination (>10k rows) prefer keyset pagination — pass `r.row_number > $cursor` as a filter parameter (§23) and drop offset entirely.
+For deep pagination (>10k rows) prefer keyset pagination — pass `r.row_id > $cursor` as a filter parameter (§23) and drop offset entirely.
 
 ---
 
@@ -761,7 +816,7 @@ table("Activities")
 ```
 
 ```sql
-SELECT DISTINCT ON ((row_data->>'<contact_id>')) row_number, row_data
+SELECT DISTINCT ON ((row_data->>'<contact_id>')) row_id, row_data
 FROM rows
 WHERE table_id = (...)
 ORDER BY (row_data->>'<contact_id>'), (row_data->>'<created_at>')::timestamptz DESC
@@ -826,14 +881,14 @@ FROM rows d
 JOIN _t td ON td.table_id = d.table_id AND td.table_name = 'Deals'
 LEFT JOIN _t tc ON tc.table_name = 'Contacts'
 LEFT JOIN rows c ON c.table_id = tc.table_id
-                AND c.row_number = (d.row_data->>'<owner_id>')::bigint
+                AND c.row_id = (d.row_data->>'<owner_id>')::bigint
 GROUP BY dim_0;
 ```
 
 Key points:
 
 - `lookup` compiles to **one `LEFT JOIN` at the SQL level — never N+1**. The name "lookup" describes the user mental model (per-row enrichment), not the execution.
-- Joins on `row_number` (the per-table integer PK). PG uses the B-tree PK index — fast.
+- Joins on `row_id` (the per-table integer PK). PG uses the B-tree PK index — fast.
 - Multiple lookups against the same target table merge into one JOIN at compile time.
 - If no matching row, the resulting field is `none`.
 
@@ -848,7 +903,7 @@ table("Tasks")
   | sort_desc("measure")
 ```
 
-Same table joined to itself by `row_number` reference.
+Same table joined to itself by `row_id` reference.
 
 ### 18.3 `lookup_recursive` — bounded multi-level hierarchy
 
@@ -870,18 +925,18 @@ table("Tasks")
 
 ```sql
 WITH RECURSIVE ancestry AS (
-  SELECT row_number, row_data, 0 AS depth,
+  SELECT row_id, row_data, 0 AS depth,
          ARRAY[]::text[] AS path
   FROM rows
   WHERE table_id = (...) AND ...
 
   UNION ALL
 
-  SELECT child.row_number, child.row_data, a.depth + 1,
+  SELECT child.row_id, child.row_data, a.depth + 1,
          a.path || (parent.row_data->>'<title>')
   FROM ancestry a
-  JOIN rows child  ON child.row_number = a.row_number
-  JOIN rows parent ON parent.row_number = (child.row_data->>'<parent>')::bigint
+  JOIN rows child  ON child.row_id = a.row_id
+  JOIN rows parent ON parent.row_id = (child.row_data->>'<parent>')::bigint
                   AND parent.table_id   = child.table_id
   WHERE a.depth < 5
 )
@@ -892,7 +947,7 @@ SELECT ... FROM ancestry WHERE depth = 5 OR ... ;
 
 ### 18.4 `join` — explicit relational join
 
-When you need INNER/LEFT/FULL semantics or a join condition richer than row_number lookup:
+When you need INNER/LEFT/FULL semantics or a join condition richer than row_id lookup:
 
 ```latticeql
 deals    := table("Deals")
@@ -900,7 +955,7 @@ contacts := table("Contacts")
 
 deals
   | join(contacts, kind: "inner", on: (d, c) -> {
-      d.owner_id == c.row_number and c.region == "APAC"
+      d.owner_id == c.row_id and c.region == "APAC"
     })
   | filter((r) -> { r.deals.status == "open" })
   | group_by((r) -> { r.contacts.company })
@@ -921,7 +976,7 @@ FROM rows d
 JOIN _t td ON td.table_id = d.table_id AND td.table_name = 'Deals'
 INNER JOIN _t tc ON tc.table_name = 'Contacts'
 INNER JOIN rows c ON c.table_id = tc.table_id
-                 AND c.row_number = (d.row_data->>'<owner_id>')::bigint
+                 AND c.row_id = (d.row_data->>'<owner_id>')::bigint
                  AND c.row_data @> '{"<region>":"APAC"}'::jsonb
 WHERE d.row_data @> '{"<status>":"open"}'::jsonb
 GROUP BY dim_0;
@@ -936,7 +991,7 @@ For "rows that **have** at least one matching row in another table" without join
 ```latticeql
 table("Contacts")
   | filter((c) -> {
-      has(table("Deals"), where: (d) -> { d.owner_id == c.row_number and d.status == "won" })
+      has(table("Deals"), where: (d) -> { d.owner_id == c.row_id and d.status == "won" })
     })
   | aggregate(count())
 ```
@@ -948,7 +1003,7 @@ WHERE c.table_id = (...)
   AND EXISTS (
     SELECT 1 FROM rows d
     WHERE d.table_id = (... 'Deals' ...)
-      AND d.row_data @> '{"<owner_id>":' || c.row_number::text || ',"<status>":"won"}'::jsonb
+      AND d.row_data @> '{"<owner_id>":' || c.row_id::text || ',"<status>":"won"}'::jsonb
   );
 ```
 
@@ -1046,7 +1101,7 @@ table("Tasks")
 ```
 
 ```sql
-SELECT row_number, row_data
+SELECT row_id, row_data
 FROM rows
 WHERE table_id = (...)
   AND row_data @> '{"<status>":"blocked"}'::jsonb
@@ -1054,7 +1109,7 @@ ORDER BY (row_data->>'<created_at>')::timestamptz ASC
 LIMIT 20;
 ```
 
-Output is the raw row list (`row_number` + full `row_data`). Frontend renders columns according to panel config.
+Output is the raw row list (`row_id` + full `row_data`); rows metadata is not returned. Frontend renders columns according to panel config.
 
 ---
 
@@ -1102,7 +1157,7 @@ Compiler also blocks:
 
 | LatticeQL | SQL |
 |---|---|
-| `table("X")` | `FROM rows WHERE table_id = 42` (numeric id from the schema) |
+| `table("X")` | `FROM rows WHERE table_id = (workspace + table-name lookup)` |
 | `\| filter(...)` (before agg) | `WHERE ...` |
 | `\| with_column("c", lambda)` | inline `CASE WHEN ...` or computed expr |
 | `\| group_by((r) -> { r.x })` | `GROUP BY row_data->>'<x>' AS dim_N` |
@@ -1118,7 +1173,7 @@ Compiler also blocks:
 | `\| unnest(r.tags, as: "t")` | `CROSS JOIN LATERAL jsonb_array_elements_text(...) t` |
 | `\| project(@{...})` | `SELECT ... AS subquery` |
 | `\| union(other)` / `intersect` / `except` | `UNION` / `INTERSECT` / `EXCEPT` |
-| `\| lookup(table("X"), key)` | `LEFT JOIN rows ... ON row_number = key` |
+| `\| lookup(table("X"), key)` | `LEFT JOIN rows ... ON row_id = key` |
 | `\| lookup_recursive(...)` | `WITH RECURSIVE ... WHERE depth < N` |
 | `\| join(other, kind:, on:)` | `<KIND> JOIN rows ... ON ...` |
 | `\| has(other, where:)` / `not_has` | `EXISTS (...)` / `NOT EXISTS (...)` |

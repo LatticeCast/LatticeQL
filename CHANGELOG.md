@@ -4,6 +4,25 @@ All notable changes to LatticeQL (Python) are documented here.
 
 ---
 
+### v0.6 — 2026-10-24 — workspace-scoped table-name resolution
+
+- Breaking: schema no longer accepts `table_id`; it contains table names and
+  columns only.
+- `compile()` returns `CompiledQuery(sql, params)`. The table name comes from
+  the query text and is inlined as a string literal, so a compiled query cannot
+  be retargeted by its caller; the only execution parameter is
+  `:workspace_id`, which resolves `rows.table_id` through `tables` under
+  row-level security. `params` is empty — the compiler binds nothing of its
+  own — and free `$param` references still emit positional `$1..$n` for the
+  host to bind.
+- Fixed: `filter` after `aggregate` (HAVING) referenced the output alias.
+  PostgreSQL resolves neither SELECT aliases nor aggregate names in HAVING, so
+  `g.measure` / `g.dim_0` now expand to the expression they stand for
+  (`COUNT(*)`, the grouping expression). GIN containment in HAVING (string
+  equality on a column) raises a `CodegenError` instead of emitting a
+  row-level predicate. Non-aggregate row lists project only `row_id` and
+  `row_data`.
+
 ### v0.5 — 2026-10-23 — rows are addressed by the table identity alone
 
 - Breaking: emitted SQL no longer carries `AND workspace_id = $1`. Rows have no

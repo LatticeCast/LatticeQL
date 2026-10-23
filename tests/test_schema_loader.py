@@ -67,10 +67,9 @@ def test_cli_schema_file(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert "COUNT(*)" in result.stdout
-    # The FROM clause carries the schema's table_id, not the name the
-    # query addressed it by, so assert the id.
-    assert "101" in result.stdout
-    assert "Tasks" not in result.stdout
+    assert ":workspace_id" in result.stdout
+    assert ":table_name" not in result.stdout
+    assert "table_name = 'Tasks'" in result.stdout
 
 
 def test_cli_schema_json(tmp_path: Path) -> None:
